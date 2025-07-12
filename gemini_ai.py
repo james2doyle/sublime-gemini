@@ -1,38 +1,48 @@
+import http.client
+import json
+import logging
+import threading
+from typing import Any, Dict, Union
+
 import sublime
 import sublime_plugin
-
-import json
-import http.client
-import threading
-
-from typing import Dict, Any
 
 # --- Configuration ---
 SETTINGS_FILE = "gemini-ai.sublime-settings"
 
+# Configure logging
+# By default, Sublime Text captures logs from the Python logging module.
+# You can set the logging level as needed.
+logging.basicConfig(level=logging.DEBUG)
+
+# Get a logger for your plugin
+logger = logging.getLogger("GeminiAIPlugin")
+
 
 # --- Helper Functions ---
-# ... (plugin_settings, view_settings, get_setting, run_linter, parse_flags - keep as before) ...
-# ... (parse_linter_output - keep version that optionally captures end_line/col) ...
-def plugin_settings():
+def plugin_settings() -> sublime.Settings:
     return sublime.load_settings(SETTINGS_FILE)
 
 
-def view_settings(view: sublime.View) -> Any:
+def view_settings(view: sublime.View) -> Dict[str, Any]:
+    # Returns a dictionary representation of the GeminiAI settings specific to the view
     return view.settings().get("GeminiAI", {})
 
 
 def get_setting(view: sublime.View, key: str, default: Any = None) -> Any:
     try:
-        return view_settings(view)[key] or default
+        # We attempt to get the setting from the view-specific settings first
+        view_specific_setting: Union[Any, None] = view_settings(view).get(key)
+        if view_specific_setting is not None:
+            return view_specific_setting
+        return plugin_settings().get(key, default)
     except KeyError:
         return plugin_settings().get(key, default)
 
-def whole_file_as_context(view: sublime.View) -> str:
-    # 2. Get the size of the entire buffer (the file content)
-    file_size = view.size()
 
-    full_region = sublime.Region(0, file_size)
+def whole_file_as_context(view: sublime.View) -> str:
+    file_size: int = view.size()
+    full_region: sublime.Region = sublime.Region(0, file_size)
 
     return view.substr(full_region)
 
@@ -42,44 +52,60 @@ class GeminiCommand(sublime_plugin.TextCommand):
         """
         Perform a few checks to make sure gemini can run
         """
-        key = get_setting(self.view, "api_token")
+        key: Union[str, None] = get_setting(self.view, "api_token")
 
         if key is None:
-            msg = "Please put an 'api_token' in the GeminiAI package settings"
+            msg: str = "Please put an 'api_token' in the GeminiAI package settings"
             sublime.status_message(msg)
             raise ValueError(msg)
 
         no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
 
-        region = self.view.sel()[0]
+        # Ensure a selection exists before accessing it
+        if not self.view.sel():
+            if no_empty_selection:
+                msg = "Please highlight a section of code."
+                sublime.status_message(msg)
+                raise ValueError(msg)
+            # If no_empty_selection is False and there is no selection,
+            # we can use an empty region or handle based on context.
+            # Assuming the rest of the code expects `self.view.sel()[0]` to exist if no_empty_selection is False.
+
+        region: sublime.Region = self.view.sel()[0]
         if region.empty() and no_empty_selection:
             msg = "Please highlight a section of code."
             sublime.status_message(msg)
             raise ValueError(msg)
 
-    def handle_thread(self, thread, label: str, seconds: int = 0):
+    def handle_thread(self, thread: 'AsyncGemini', label: str, seconds: int = 0):
         """
         Recursive method for checking in on the AsyncGemini API fetcher
         """
-        max_seconds = get_setting(self.view, "max_seconds", 60)
+        max_seconds: int = get_setting(self.view, "max_seconds", 60)
 
         # If we ran out of time, let user know, stop checking on the thread
         if seconds > max_seconds:
-            msg = "Gemini ran out of time! {}s".format(max_seconds)
+            logger.debug("Thread for %s is maxed out", thread.endpoint)
+            msg: str = "Gemini ran out of time! {}s".format(max_seconds)
             sublime.status_message(msg)
             return
 
         # While the thread is running, show them some feedback,
         # and keep checking on the thread
         if thread.running:
-            msg = "Gemini is thinking, one moment... ({}/{}s)".format(seconds, max_seconds)
+            logger.debug("Thread for %s is running", thread.endpoint)
+
+            msg: str = "Gemini is thinking, one moment... ({}/{}s)".format(seconds, max_seconds)
             sublime.status_message(msg)
+
             # Wait a second, then check on it again
             sublime.set_timeout(lambda: self.handle_thread(thread, label, seconds + 1), 1000)
+
             return
 
         # If we finished with no result, something is wrong
         if not thread.result:
+            logger.debug("Thread for %s is done", thread.endpoint)
             sublime.status_message("Something is wrong with Gemini - aborting")
             return
 
@@ -101,19 +127,20 @@ class CompletionGeminiCommand(GeminiCommand):
     Give a prompt of text/code for GPT3 to complete
     """
 
-    def run(self, edit):
+    def run(self, edit: sublime.Edit):
         # Check config and prompt
         self.check_setup()
 
         no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
 
+        # Check if there are selections and if no_empty_selection is enabled
         if len(self.view.sel()) == 0 and no_empty_selection:
-            msg = "Please highlight only 1 chunk of code."
+            msg: str = "Please highlight only 1 chunk of code."
             sublime.status_message(msg)
             raise ValueError(msg)
 
         # Gather data needed for gemini, prep thread to run async
-        region = self.view.sel()[0]
+        region: sublime.Region = self.view.sel()[0]
         settingsc: Dict[str, Any] = get_setting(self.view, "completions")
 
         data: Dict[str, Any] = {
@@ -131,12 +158,11 @@ class CompletionGeminiCommand(GeminiCommand):
         }
 
         hasPreText: bool = settingsc.get("keep_prompt_text", False)
+        preText: str = ""
         if hasPreText:
             preText = self.view.substr(region)
-        else:
-            preText = ""
 
-        thread = AsyncGemini(self.view, region, "completions", data, preText)
+        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, preText)
 
         # Perform the async fetching and editing
         thread.start()
@@ -150,15 +176,17 @@ class EditGeminiCommand(GeminiCommand):
     (.e.g.: "Translate this code to Javascript" or "Reduce runtime complexity")
     """
 
-    def run(self, edit):
+    def run(self, edit: sublime.Edit):
         # Get the active window
-        window = self.view.window()
+        window: Union[sublime.Window, None] = self.view.window()
 
         # If there is no active window, we cannot proceed
         if not window:
             return
 
         # Show the input panel
+        # The return value of show_input_panel is the InputPanel instance,
+        # but we don't need to store it here.
         _ = window.show_input_panel(
             caption="Enter your prompt:",
             initial_text="",
@@ -172,34 +200,20 @@ class EditGeminiCommand(GeminiCommand):
         Callback function executed when the user presses Enter.
         """
         # Ensure we have a view and an edit object to modify the buffer
-        view = self.view
+        view: sublime.View = self.view
         if not view:
             return
-
-        # Insert the user input at the current cursor position(s)
-        # We need to run this insertion within an edit object
-        # In a TextCommand's run method, the edit argument is provided automatically.
-        # However, since this is a callback function (on_input_done), we must use
-        # view.run_command() to perform the edit action.
-
-        # Note: When using an input panel, the code execution continues immediately
-        # after show_input_panel() is called. The on_done callback is executed
-        # asynchronously when the user provides input.
-
-        # We use a separate command or direct view modification if appropriate.
-        # For simplicity in a TextCommand, we can define the action in a helper method
-        # and then call it using run_command or rely on the fact that on_done is
-        # called within a context where modifications can be made safely, typically
-        # using the TextCommand's view.
 
         # Check config and prompt
         self.check_setup()
 
-        use_whole_file = len(self.view.sel()) == 0
+        # Determine if we should use the whole file as context
+        # based on whether there is an active selection.
+        use_whole_file: bool = len(self.view.sel()) == 0
 
         # Gather data needed for gemini, prep thread to run async
-        region = self.view.sel()[0]
-        content = self.view.substr(region)
+        region: sublime.Region = self.view.sel()[0]
+        content: str = self.view.substr(region)
         if use_whole_file:
             content = whole_file_as_context(self.view)
 
@@ -218,7 +232,7 @@ class EditGeminiCommand(GeminiCommand):
             "top_p": settingse.get("top_p", 1),
         }
 
-        thread = AsyncGemini(self.view, region, "completions", data, "")
+        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, "")
 
         # Perform the async fetching and editing
         thread.start()
@@ -237,8 +251,9 @@ class AsyncGemini(threading.Thread):
     OpenAI Gemini API, and waiting for a response
     """
 
-    running = False
-    result = None
+    # Class attributes for thread state and result
+    running: bool = False
+    result: Union[str, None] = None
 
     def __init__(self, view: sublime.View, region: sublime.Region, endpoint: str, data: Dict[str, Any], preText: str):
         """
@@ -251,13 +266,14 @@ class AsyncGemini(threading.Thread):
             leave as None
         """
         super().__init__()
-        self.view = view
-        self.region = region
-        self.endpoint = endpoint
-        self.data = data
-        self.preText = preText
+        self.view: sublime.View = view
+        self.region: sublime.Region = region
+        self.endpoint: str = endpoint
+        self.data: Dict[str, Any] = data
+        self.preText: str = preText
 
     def run(self):
+        # Override of the threading.Thread run method
         self.running = True
         self.result = self.get_gemini_response()
         self.running = False
@@ -268,24 +284,41 @@ class AsyncGemini(threading.Thread):
         model, returning the response
         """
 
-        token: str = get_setting(self.view, "api_token", None)
+        token: Union[str, None] = get_setting(self.view, "api_token", None)
         hostname: str = get_setting(self.view, "hostname", "generativelanguage.googleapis.com")
 
-        conn = http.client.HTTPSConnection(hostname)
-        headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
-        data = json.dumps(self.data)
+        # Ensure token is not None before proceeding
+        if token is None:
+            raise ValueError("API token is missing.")
+
+        conn: http.client.HTTPSConnection = http.client.HTTPSConnection(hostname)
+        headers: Dict[str, str] = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+        # Data is already dumped to JSON string in the `run` method when passed to conn.request.
+        # However, `json.dumps(self.data)` converts the Python dict to a JSON string bytes.
+        data: str = json.dumps(self.data)
+        logger.debug("API request data: %s", data)
 
         conn.request("POST", "/v1beta/openai/chat/{}".format(self.endpoint), data, headers)
-        response = conn.getresponse()
+        response: http.client.HTTPResponse = conn.getresponse()
 
+        # Decode the response and load the JSON
         response_dict: Dict[str, Any] = json.loads(response.read().decode())
+        logger.debug("API response data: %s", response_dict)
 
         if response_dict.get("error", None):
             raise ValueError(response_dict["error"])
         else:
-            choice = response_dict.get("choices", [{}])[0]
-            ai_text = choice["message"]["content"]
-            useage = response_dict["usage"]["total_tokens"]
+            # Type hinting the retrieved choice and usage data
+            choices: list[Dict[str, Any]] = response_dict.get("choices", [{}])
+            choice: Dict[str, Any] = choices[0]
+
+            # Accessing content from the message dictionary within the choice
+            ai_text: str = choice["message"]["content"]
+
+            # Accessing usage information
+            usage_info: Dict[str, int] = response_dict["usage"]
+            useage: int = usage_info["total_tokens"]
+
             sublime.status_message("Gemini tokens used: " + str(useage))
 
             return ai_text
@@ -296,9 +329,10 @@ class ReplaceTextCommand(sublime_plugin.TextCommand):
     Simple command for inserting text
     https://forum.sublimetext.com/t/solved-st3-edit-object-outside-run-method-has-return-how-to/19011/7
     """
-    def run(self, edit, region, text: str):
-        region = sublime.Region(*region)
-        self.view.replace(edit, region, text)
+    def run(self, edit: sublime.Edit, region, text: str):
+        # Cast the input region list to a sublime.Region object
+        sublime_region: sublime.Region = sublime.Region(*region)
+        self.view.replace(edit, sublime_region, text)
 
 
 class OpenNewTabWithContentCommand(sublime_plugin.WindowCommand):
@@ -307,7 +341,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.WindowCommand):
     and inserts content into it.
     """
     def run(self, text: str):
-        new_view = self.window.new_file()
+        new_view: sublime.View = self.window.new_file()
         new_view.set_name("Gemini Results")
         new_view.assign_syntax('source:text.html.markdown')
         new_view.run_command("insert", {"characters": text})

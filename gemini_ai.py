@@ -282,7 +282,7 @@ class EditGeminiCommand(GeminiCommand):
         syntax_name: str = syntax_path.split('/').pop().split('.')[0]
         logger.debug("Current syntax name: %s", syntax_name)
 
-        preText: str = "{} Code:\n\n{}\n\nInstruction:\n\n{}".format(syntax_name, content, user_input)
+        preText: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
         data: Dict[str, Any] = {
             "model": settingse.get("edit_model", "gemini-2.5-flash"),

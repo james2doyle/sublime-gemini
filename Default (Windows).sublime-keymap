@@ -1,0 +1,16 @@
+[
+  // Request a prompt based on the highlighted text from gemini
+  {
+    "keys": [
+      "ctrl+shift+insert"
+    ],
+    "command": "completion_gemini"
+  },
+  // Instruct a type of edit on the highlighted text
+  {
+    "keys": [
+      "ctrl+shift+end"
+    ],
+    "command": "edit_gemini"
+  },
+]

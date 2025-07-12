@@ -1,0 +1,41 @@
+[project]
+name = "GeminiAi"
+version = "1.0.0"
+description = ""
+authors = ["James Doyle <james2doyle@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[project.dependencies]
+python = "^3.8" # Specify your Python version requirement
+
+[project.optional-dependencies]
+dev = [
+    "pyright", # Add pyright as a development dependency
+    "pyrefly", # Add pyrefly as a development dependency
+    "ruff", # Add ruff as a development dependency
+]
+
+# Pyright Configuration
+# See https://github.com/microsoft/pyright/blob/main/docs/configuration.md
+[tool.pyright]
+pythonVersion = '3.8'
+# Specify your source directory
+include = ["."]
+reportMissingModuleSource = "none"
+reportIncompatibleMethodOverride = "none"
+stubPath = "../typings"
+
+# Ruff Configuration
+# See https://docs.astral.sh/ruff/configuration/
+[tool.ruff]
+preview = true
+line-length = 120
+target-version = 'py38'
+include = ["*.py", "*.pyi", "*.ipynb", "../typings/**/*.pyi"]
+
+# [tool.pyrefly]
+# project_includes = ["**/*.py", "**/*.pyi", "../typings/**/*.pyi"]
+# search_path = [
+#     "./..."
+# ]

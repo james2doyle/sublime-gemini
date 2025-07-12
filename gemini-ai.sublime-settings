@@ -1,0 +1,18 @@
+{
+    "api_token": "<put your key here from https://beta.openai.com/account/api-keys>",
+    "hostname": "generativelanguage.googleapis.com",
+    "max_seconds": 10,
+    "no_empty_selection": true,
+    "completions": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.0,
+        "top_p": 1,
+        "max_tokens": 100,
+        "keep_prompt_text": true
+    },
+    "edits": {
+        "model": "gemini-2.5-flash",
+        "temperature": 0.4,
+        "top_p": 1
+    }
+}

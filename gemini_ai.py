@@ -463,7 +463,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
     def run(self, edit: sublime.Edit, instruction: str, text: str):
         window = self.view.window()
         if not window:
-            return
+            raise ValueError("No window found for creating the new tab.")
 
         new_view = window.new_file(sublime.ADD_TO_SELECTION)
 

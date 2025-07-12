@@ -127,11 +127,15 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
         # If the thread finished successfully and has a result, update the UI
         if label == "completions":
+            logger.debug("Running command for `completions` with content: {}".format(thread.result))
             # Ensure UI updates are done on the main thread
             sublime.set_timeout(
                 lambda: self.view.run_command(
                     "replace_text",
-                    {"region": [thread.region.begin(), thread.region.end()], "text": thread.preText + thread.result},
+                    {
+                        "region": [thread.region.begin(), thread.region.end()],
+                        "text": "{}{}".format(thread.preText, thread.result)
+                    },
                 ),
                 0
             )
@@ -139,13 +143,14 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
 
         if label == "edits":
+            logger.debug("Running command for `edits` with content: {}".format(thread.result))
             # Ensure UI updates are done on the main thread
             sublime.set_timeout(
                 lambda: self.view.run_command(
                     "open_new_tab_with_content",
-                    {"text": thread.result},
+                    {"instruction": thread.preText, "text": thread.result},
                 ),
-                0
+                100
             )
             sublime.status_message("Gemini AI edit opened in new tab.")
 
@@ -174,13 +179,27 @@ class CompletionGeminiCommand(GeminiCommand):
         region: sublime.Region = self.view.sel()[0]
         settingsc: Dict[str, Any] = get_setting(self.view, "completions")
 
+        # Retrieve the syntax setting
+        syntax_path: str = self.view.settings().get('syntax')
+
+        if syntax_path:
+            # Print the syntax path to the Sublime Text console
+            logger.debug("Current syntax path: %s", syntax_path)
+        else:
+            logger.debug("No syntax defined for the current view.")
+
+        syntax_name: str = syntax_path.split('/').pop().split('.')[0]
+        logger.debug("Current syntax name: %s", syntax_name)
+
         data: Dict[str, Any] = {
             "model": settingsc.get("model", "gemini-2.5-flash"),
             "messages": [
-                {"role": "system", "content": "You are a helpful coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks"},
+                {
+                    "role": "system",
+                    "content": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks".format(syntax_name) },
                 {
                     "role": "user",
-                    "content": "Here is some pyton code: {}".format(self.view.substr(region))
+                    "content": "{}".format(self.view.substr(region))
                 }
             ],
             "max_tokens": settingsc.get("max_tokens", 100),
@@ -251,13 +270,30 @@ class EditGeminiCommand(GeminiCommand):
 
         settingse: Dict[str, Any] = get_setting(self.view, "edits")
 
+        # Retrieve the syntax setting
+        syntax_path: str = self.view.settings().get('syntax')
+
+        if syntax_path:
+            # Print the syntax path to the Sublime Text console
+            logger.debug("Current syntax path: %s", syntax_path)
+        else:
+            logger.debug("No syntax defined for the current view.")
+
+        syntax_name: str = syntax_path.split('/').pop().split('.')[0]
+        logger.debug("Current syntax name: %s", syntax_name)
+
+        preText: str = "{} Code:\n\n{}\n\nInstruction:\n\n{}".format(syntax_name, content, user_input)
+
         data: Dict[str, Any] = {
             "model": settingse.get("edit_model", "gemini-2.5-flash"),
             "messages": [
-                {"role": "system", "content": "You are a helpful coding assistant. Do not wrap any code output with backticks or format it as markdown."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.".format(syntax_name)
+                },
                 {
                     "role": "user",
-                    "content": "Code:\n{}\nInstruction:\n{}".format(content, user_input)
+                    "content": preText
                 }
             ],
             "temperature": settingse.get("temperature", 0),
@@ -269,7 +305,7 @@ class EditGeminiCommand(GeminiCommand):
         # Assuming the API endpoint for edits is still under "chat" and uses "completions" internally
         # or that the instruction in the message handles the "edit" functionality.
         # If the Gemini API has a dedicated "edits" endpoint, this might need adjustment.
-        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, "") # Keeping "completions" as per original logic
+        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, preText) # Keeping "completions" as per original logic
 
         # Perform the async fetching and editing
         thread.start()
@@ -387,6 +423,12 @@ class AsyncGemini(threading.Thread):
                 raise ValueError("No choices found in API response.")
 
             choice: Dict[str, Any] = choices[0]
+
+            finished = choice.get("finish_reason", None)
+            # ran out of tokens or hit the max amount
+            if finished == "length":
+                raise ValueError("Finished early because of {}.".format(finished))
+
             message: Dict[str, Any] = choice.get("message", {})
             ai_text: str = message.get("content", "")
 
@@ -413,14 +455,38 @@ class ReplaceTextCommand(sublime_plugin.TextCommand):
         self.view.replace(edit, sublime_region, text)
 
 
-class OpenNewTabWithContentCommand(sublime_plugin.WindowCommand):
+class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
     """
     A Sublime Text plugin command that opens a new empty tab
     and inserts content into it. This command must be run on the main thread.
     """
-    def run(self, text: str):
-        new_view: sublime.View = self.window.new_file()
+    def run(self, edit: sublime.Edit, instruction: str, text: str):
+        window = self.view.window()
+        if not window:
+            return
+
+        new_view = window.new_file(sublime.ADD_TO_SELECTION)
+
         new_view.set_name("Gemini Results")
+
         # Set syntax highlighting for better readability, e.g., Markdown
-        new_view.assign_syntax('source:text.html.markdown')
-        new_view.run_command("insert", {"characters": text})
+        # new_view.assign_syntax('source:text.html.markdown')
+        new_view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
+
+        # We need to run the insert command on the new_view.
+        # The arguments are 'characters' (the text to insert) and 'point' (where to insert, 0 for the beginning).
+        new_view.run_command("insert", {"characters": "### User:\n\n{}\n\n---\n\n".format(instruction), "point": 0})
+        sublime.set_timeout(
+            lambda: new_view.run_command("insert", {"characters": "### Results:\n\n{}".format(text), "point": len(instruction) + 4}),
+            100
+        )
+        sublime.set_timeout(
+            lambda: new_view.run_command("move_to", {"to": "bof"}),
+            200
+        )
+        sublime.set_timeout(
+            lambda: new_view.run_command("reindent", {"single_line": False}),
+            300
+        )
+
+        window.focus_view(new_view)

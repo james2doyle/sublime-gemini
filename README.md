@@ -1,5 +1,7 @@
 # Sublime Gemini AI Plugin
 
+> This project is inspired by [necarlson97/codex-ai-sublime](https://github.com/necarlson97/codex-ai-sublime) but refactored with the help of Gemini
+
 A Sublime Text 3/4 plugin that integrates Google's Gemini AI for intelligent code completion and editing directly within your editor. Leverage Gemini's capabilities to generate code, refactor, or get suggestions based on your current file or selection.
 
 ## Features

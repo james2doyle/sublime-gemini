@@ -11,22 +11,17 @@ import sublime_plugin
 # --- Configuration ---
 SETTINGS_FILE = "gemini-ai.sublime-settings"
 
-# Configure logging to be toggled by settings later
-# For now, keep it as DEBUG for development
-logging.basicConfig(level=logging.DEBUG)
+# Initialize logger, its level will be set based on user settings
 logger = logging.getLogger("GeminiAIPlugin")
-
 
 # --- Helper Functions ---
 def plugin_settings() -> sublime.Settings:
     """Loads and returns the plugin's settings."""
     return sublime.load_settings(SETTINGS_FILE)
 
-
 def view_settings(view: sublime.View) -> Dict[str, Any]:
     """Returns a dictionary representation of the GeminiAI settings specific to the view."""
     return view.settings().get("GeminiAI", {})
-
 
 def get_setting(view: sublime.View, key: str, default: Any = None) -> Any:
     """
@@ -42,13 +37,44 @@ def get_setting(view: sublime.View, key: str, default: Any = None) -> Any:
         # Fallback in case of unexpected KeyError, though .get() should prevent this.
         return plugin_settings().get(key, default)
 
-
 def whole_file_as_context(view: sublime.View) -> str:
     """Reads the entire content of the view and returns it as a string."""
     file_size: int = view.size()
     full_region: sublime.Region = sublime.Region(0, file_size)
     return view.substr(full_region)
 
+# --- Event Listener for Settings Changes ---
+class GeminiAiSettingsListener(sublime_plugin.EventListener):
+    """
+    Listens for changes in the plugin settings to update the logger level.
+    """
+    def on_init(self, views):
+        # Called once when the plugin is loaded.
+        # Set up the initial logging level.
+        _update_logging_level()
+        # Add a listener for settings changes to update logging dynamically.
+        # Changed the setting key and the on_change tag to 'debug_logging'
+        plugin_settings().add_on_change("gemini_ai_debug_logging", _update_logging_level)
+
+    def on_exit(self):
+        # Remove the settings listener when the plugin is unloaded.
+        plugin_settings().clear_on_change("gemini_ai_debug_logging")
+
+def _update_logging_level():
+    """
+    Updates the logger's level based on the 'debug_logging' setting.
+    """
+    settings = plugin_settings()
+    # Changed 'enable_logging' to 'debug_logging'
+    debug_logging = settings.get("debug_logging", False) # Default to False if not set
+
+    if debug_logging:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Gemini AI Plugin logging enabled.")
+    else:
+        logger.setLevel(logging.CRITICAL) # Set to CRITICAL to effectively disable logging
+        # Optionally, you could set it to NOTSET and let root logger handle it,
+        # but CRITICAL ensures no messages from this logger pass through.
 
 class AsyncGemini(threading.Thread):
     """
@@ -197,7 +223,7 @@ class GeminiCommand(sublime_plugin.TextCommand):
         and selection validity.
         Raises ValueError if setup is incomplete or invalid.
         """
-        key: Union[str, None] = get_setting(self.view, "api_token")
+        key: Union[str, None] = get_setting(self.view, "api_token", None)
 
         if key is None:
             msg: str = "Please put an 'api_token' in the GeminiAI package settings"

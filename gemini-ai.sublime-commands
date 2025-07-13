@@ -1,10 +1,10 @@
 [
     {
-        "caption": "Gemini AI: Generate AI text from highlighted prompt",
-        "command": "completion_gemini"
+        "caption": "Gemini AI: Complete Code",
+        "command": "gemini_ai_completion"
     },
     {
-        "caption": "Gemini AI: Instruct AI to edit highlighted text",
-        "command": "edit_gemini"
+        "caption": "Gemini AI: Instruct Code",
+        "command": "gemini_ai_instruct"
     }
 ]

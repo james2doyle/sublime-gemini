@@ -203,7 +203,8 @@ class AsyncGemini(threading.Thread):
 
             if not content_parts:
                 # This error is now more specific as finish_reason would have been handled
-                raise ValueError("No content parts found in AI response. This could be due to an empty model response even after successful generation.")
+                # This could happen if the model returned a candidate but with no actual text content.
+                raise ValueError("No text content parts found in AI response.")
 
             ai_text: str = content_parts[0].get("text", "")
 
@@ -256,7 +257,7 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
         Args:
             thread: The AsyncGemini thread instance.
-            label: A string label for the command (e.g., "completions", "edits").
+            label: A string label for the command (e.g., "completions", "instruct").
             on_success_callback: A callable function to execute when the thread finishes successfully.
                                  It will receive the thread instance as an argument.
             seconds: Current elapsed time for the timeout.
@@ -305,7 +306,7 @@ class GeminiBaseAiCommand(GeminiCommand):
 
     def get_settings_key(self) -> str:
         """
-        Returns the key used to retrieve command-specific settings (e.g., "completions", "edits").
+        Returns the key used to retrieve command-specific settings (e.g., "completions", "instruct").
         Must be implemented by subclasses.
         """
         raise NotImplementedError("Subclasses must implement get_settings_key()")
@@ -325,7 +326,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         Args:
             content: The selected text or whole file content.
             syntax_name: The name of the current file's syntax.
-            user_input: Optional user input for commands like 'edit'.
+            user_input: Optional user input for commands like 'instruct'.
         """
         raise NotImplementedError("Subclasses must implement get_prompt_data()")
 
@@ -357,8 +358,8 @@ class GeminiBaseAiCommand(GeminiCommand):
         preText: str = ""
         if settings_key == "completions" and command_settings.get("keep_prompt_text", False):
             preText = content
-        elif settings_key == "edits":
-             # For edits, preText is the instruction + original content for the new tab
+        elif settings_key == "instruct": # Changed "edits" to "instruct"
+             # For instruct, preText is the instruction + original content for the new tab
             preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
         # Use the current selection region for the thread, or an empty region if none
@@ -438,20 +439,20 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
         self._prepare_and_run_gemini_thread(content)
 
 
-class EditGeminiCommand(GeminiBaseAiCommand):
+class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from EditGeminiCommand to InstructGeminiCommand
     """
     Provides a prompt of text/code to Gemini along with an instruction of how to
     modify the prompt, while trying to keep the functionality the same.
     """
     def get_settings_key(self) -> str:
-        return "edits"
+        return "instruct" # Changed "edits" to "instruct"
 
     def get_command_label(self) -> str:
-        return "edits"
+        return "instruct" # Changed "edits" to "instruct"
 
     def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
         """
-        Constructs the data payload for the Gemini API edit request.
+        Constructs the data payload for the Gemini API instruct request.
         """
         settingse: Dict[str, Any] = get_setting(self.view, self.get_settings_key())
 
@@ -459,7 +460,7 @@ class EditGeminiCommand(GeminiBaseAiCommand):
         preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
         return {
-            "model": settingse.get("edit_model", "gemini-2.5-flash"), # Note: 'edit_model' for edits
+            "model": settingse.get("model", "gemini-2.5-flash"), # Changed 'edit_model' to 'model' for consistency
             "contents": [
                 {
                     "role": "user",
@@ -474,9 +475,9 @@ class EditGeminiCommand(GeminiBaseAiCommand):
 
     def on_api_success(self, thread: 'AsyncGemini'):
         """
-        Opens a new tab with the edited content.
+        Opens a new tab with the instructed content.
         """
-        logger.debug("Running command for `edits` with content: {}".format(thread.result))
+        logger.debug("Running command for `instruct` with content: {}".format(thread.result)) # Changed "edits" to "instruct"
         # Ensure UI updates are done on the main thread
         sublime.set_timeout(
             lambda: self.view.run_command(
@@ -485,7 +486,7 @@ class EditGeminiCommand(GeminiBaseAiCommand):
             ),
             100
         )
-        sublime.status_message("Gemini AI edit opened in new tab.")
+        sublime.status_message("Gemini AI instruction opened in new tab.") # Changed "edit" to "instruction"
 
     def run(self, edit: sublime.Edit):
         # Get the active window
@@ -497,7 +498,7 @@ class EditGeminiCommand(GeminiBaseAiCommand):
 
         # Show the input panel
         _ = window.show_input_panel(
-            caption="Enter your prompt:",
+            caption="Enter your instruction:", # Changed "prompt" to "instruction"
             initial_text="",
             on_done=self.on_input_done,
             on_change=None,
@@ -507,7 +508,7 @@ class EditGeminiCommand(GeminiBaseAiCommand):
     def on_input_done(self, user_input: str):
         """
         Callback function executed when the user presses Enter in the input panel.
-        Initiates the Gemini edit request.
+        Initiates the Gemini instruct request.
         """
         # Ensure we have a view
         view: sublime.View = self.view

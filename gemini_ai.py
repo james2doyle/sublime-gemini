@@ -2,8 +2,7 @@ import http.client
 import json
 import logging
 import threading
-
-from typing import Any, Dict, Union
+from typing import Any, Callable, Dict, List, Union
 
 import sublime
 import sublime_plugin
@@ -14,14 +13,17 @@ SETTINGS_FILE = "gemini-ai.sublime-settings"
 # Initialize logger, its level will be set based on user settings
 logger = logging.getLogger("GeminiAIPlugin")
 
+
 # --- Helper Functions ---
 def plugin_settings() -> sublime.Settings:
     """Loads and returns the plugin's settings."""
     return sublime.load_settings(SETTINGS_FILE)
 
+
 def view_settings(view: sublime.View) -> Dict[str, Any]:
     """Returns a dictionary representation of the GeminiAI settings specific to the view."""
     return view.settings().get("GeminiAI", {})
+
 
 def get_setting(view: sublime.View, key: str, default: Any = None) -> Any:
     """
@@ -37,44 +39,49 @@ def get_setting(view: sublime.View, key: str, default: Any = None) -> Any:
         # Fallback in case of unexpected KeyError, though .get() should prevent this.
         return plugin_settings().get(key, default)
 
+
 def whole_file_as_context(view: sublime.View) -> str:
     """Reads the entire content of the view and returns it as a string."""
     file_size: int = view.size()
     full_region: sublime.Region = sublime.Region(0, file_size)
     return view.substr(full_region)
 
+
 # --- Event Listener for Settings Changes ---
 class GeminiAiSettingsListener(sublime_plugin.EventListener):
     """
     Listens for changes in the plugin settings to update the logger level.
     """
-    def on_init(self, views):
+
+    def on_init(self, views: List[sublime.View]) -> None:
         # Called once when the plugin is loaded.
         # Set up the initial logging level.
         _update_logging_level()
         # Add a listener for settings changes to update logging dynamically.
-        # Changed the setting key and the on_change tag to 'debug_logging'
+
         plugin_settings().add_on_change("gemini_ai_debug_logging", _update_logging_level)
 
-    def on_exit(self):
+    def on_exit(self) -> None:
         # Remove the settings listener when the plugin is unloaded.
         plugin_settings().clear_on_change("gemini_ai_debug_logging")
 
-def _update_logging_level():
+
+def _update_logging_level() -> None:
     """
     Updates the logger's level based on the 'debug_logging' setting.
     """
     settings = plugin_settings()
-    # Changed 'enable_logging' to 'debug_logging'
-    debug_logging = settings.get("debug_logging", False) # Default to False if not set
+
+    debug_logging: bool = settings.get("debug_logging", False)  # Default to False if not set
 
     if debug_logging:
         logger.setLevel(logging.DEBUG)
         logger.debug("Gemini AI Plugin logging enabled.")
     else:
-        logger.setLevel(logging.CRITICAL) # Set to CRITICAL to effectively disable logging
+        logger.setLevel(logging.CRITICAL)  # Set to CRITICAL to effectively disable logging
         # Optionally, you could set it to NOTSET and let root logger handle it,
         # but CRITICAL ensures no messages from this logger pass through.
+
 
 class AsyncGemini(threading.Thread):
     """
@@ -98,15 +105,15 @@ class AsyncGemini(threading.Thread):
         self.preText: str = preText
         self.running: bool = False
         self.result: Union[str, None] = None
-        self.error: Union[str, None] = None # New attribute to store error messages
+        self.error: Union[str, None] = None  # New attribute to store error messages
 
-    def run(self):
+    def run(self) -> None:
         """
         Overrides the threading.Thread run method.
         Performs the API call and handles potential errors.
         """
         self.running = True
-        self.result = None # Reset result
+        self.result = None  # Reset result
         self.error = None  # Reset error
         try:
             self.result = self.get_gemini_response()
@@ -123,7 +130,7 @@ class AsyncGemini(threading.Thread):
         """
         token: Union[str, None] = get_setting(self.view, "api_token", None)
         hostname: str = get_setting(self.view, "hostname", "generativelanguage.googleapis.com")
-        model_name: str = self.data.get("model", "gemini-2.5-flash") # Model name from data
+        model_name: str = self.data.get("model", "gemini-2.5-flash")  # Model name from data
         # The API endpoint path is now hardcoded as per the task.
         # It always points to the generateContent endpoint for the specified model version.
         api_path: str = "/v1beta/models/{}:generateContent".format(model_name)
@@ -135,9 +142,7 @@ class AsyncGemini(threading.Thread):
         # Using http.client for HTTPS connection
         conn: http.client.HTTPSConnection = http.client.HTTPSConnection(hostname)
 
-        headers: Dict[str, str] = {
-            "Content-Type": "application/json"
-        }
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
 
         # Prepare the data payload as a JSON string
         # Remove 'model' from payload_for_body as it's used in the URL
@@ -157,7 +162,7 @@ class AsyncGemini(threading.Thread):
         response: http.client.HTTPResponse = conn.getresponse()
 
         # Decode the response and load the JSON
-        response_body: str = response.read().decode('utf-8')
+        response_body: str = response.read().decode("utf-8")
         response_dict: Dict[str, Any] = json.loads(response_body)
         logger.debug("API response data: {}".format(response_dict))
 
@@ -171,27 +176,35 @@ class AsyncGemini(threading.Thread):
             safety_ratings = prompt_feedback.get("safetyRatings", [])
             for rating in safety_ratings:
                 if rating.get("blocked"):
-                    raise ValueError("Prompt blocked by safety filters: {}".format(rating.get("reason", "Unknown reason")))
+                    raise ValueError(
+                        "Prompt blocked by safety filters: {}".format(rating.get("reason", "Unknown reason"))
+                    )
 
             # Check for candidates and their finish reasons first
-            candidates: list[Dict[str, Any]] = response_dict.get("candidates", [])
+            candidates: List[Dict[str, Any]] = response_dict.get("candidates", [])
             if not candidates:
                 # If no candidates and no prompt feedback, it's an unexpected empty response
-                raise ValueError("Gemini did not return any candidates. The model might have generated no response or encountered an internal issue.")
+                raise ValueError(
+                    "Gemini did not return any candidates. The model might have generated no response or encountered an internal issue."
+                )
 
             first_candidate: Dict[str, Any] = candidates[0]
-            finish_reason = first_candidate.get("finishReason", None) # Changed from 'finish_reason' to 'finishReason' as per log
+            finish_reason = first_candidate.get("finishReason", None)
 
             if finish_reason:
                 # Provide more specific messages for different finish reasons
                 if finish_reason == "STOP":
                     # This means the model finished normally, but might not have content if output was short
-                    pass # Will proceed to check content_parts
+                    pass  # Will proceed to check content_parts
                 elif finish_reason == "MAX_TOKENS":
                     # Get the total token count from usageMetadata
                     usage_metadata = response_dict.get("usageMetadata", {})
                     total_token_count = usage_metadata.get("totalTokenCount", 0)
-                    raise ValueError("Gemini finished early due to max tokens limit. Used {} tokens. Try increasing 'max_tokens' in settings.".format(total_token_count))
+                    raise ValueError(
+                        "Gemini finished early due to max tokens limit. Used {} tokens. Try increasing 'max_tokens' in settings.".format(
+                            total_token_count
+                        )
+                    )
                 elif finish_reason == "SAFETY":
                     raise ValueError("Gemini response blocked by safety filters.")
                 elif finish_reason == "RECITATION":
@@ -199,7 +212,7 @@ class AsyncGemini(threading.Thread):
                 else:
                     raise ValueError("Gemini finished early with reason: {}".format(finish_reason))
 
-            content_parts: list[Dict[str, Any]] = first_candidate.get("content", {}).get("parts", [])
+            content_parts: List[Dict[str, Any]] = first_candidate.get("content", {}).get("parts", [])
 
             if not content_parts:
                 # This error is now more specific as finish_reason would have been handled
@@ -218,7 +231,8 @@ class GeminiCommand(sublime_plugin.TextCommand):
     """
     Base class for Gemini AI commands, providing common setup and thread handling.
     """
-    def check_setup(self):
+
+    def check_setup(self) -> None:
         """
         Performs checks to ensure Gemini AI can run, such as API key presence
         and selection validity.
@@ -228,7 +242,7 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
         if key is None:
             msg: str = "Please put an 'api_token' in the GeminiAI package settings"
-            sublime.error_message(msg) # Use error_message for critical setup issues
+            sublime.error_message(msg)  # Use error_message for critical setup issues
             raise ValueError(msg)
 
         no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
@@ -250,7 +264,9 @@ class GeminiCommand(sublime_plugin.TextCommand):
             sublime.status_message(msg)
             raise ValueError(msg)
 
-    def handle_thread(self, thread: 'AsyncGemini', label: str, on_success_callback, seconds: int = 0):
+    def handle_thread(
+        self, thread: "AsyncGemini", label: str, on_success_callback: Callable[["AsyncGemini"], None], seconds: int = 0
+    ) -> None:
         """
         Recursively checks the status of the AsyncGemini thread and updates the UI
         or shows feedback. Dispatches UI updates to the main thread.
@@ -312,7 +328,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         raise NotImplementedError("Subclasses must implement get_command_info()")
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API request.
         Must be implemented by subclasses.
@@ -324,7 +340,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         raise NotImplementedError("Subclasses must implement get_prompt_data()")
 
-    def on_api_success(self, thread: 'AsyncGemini'):
+    def on_api_success(self, thread: "AsyncGemini") -> None:
         """
         Callback executed when the AsyncGemini thread finishes successfully.
         Contains the logic for handling the API response (e.g., inserting text,
@@ -332,16 +348,16 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         raise NotImplementedError("Subclasses must implement on_api_success()")
 
-    def _prepare_and_run_gemini_thread(self, content: str, user_input: str = None):
+    def _prepare_and_run_gemini_thread(self, content: str, user_input: Union[str, None] = None) -> None:
         """
         Internal method to prepare the data, create the thread, and start monitoring it.
         """
         # Get command name from subclass
-        command_name = self.get_command_info()
+        command_name: str = self.get_command_info()
         command_settings: Dict[str, Any] = get_setting(self.view, command_name)
 
-        syntax_path: str = self.view.settings().get('syntax')
-        syntax_name: str = syntax_path.split('/').pop().split('.')[0] if syntax_path else "plain text"
+        syntax_path: str = self.view.settings().get("syntax")
+        syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
         logger.debug("Current syntax name: {}".format(syntax_name))
 
         # Get prompt data from subclass
@@ -353,8 +369,10 @@ class GeminiBaseAiCommand(GeminiCommand):
         if command_name == "completions" and command_settings.get("keep_prompt_text", False):
             preText = content
         elif command_name == "instruct":
-             # For instruct, preText is the instruction + original content for the new tab
-            preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
+            # For instruct, preText is the instruction + original content for the new tab
+            preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
+                syntax_name, syntax_name.lower(), content, user_input
+            )
 
         # Use the current selection region for the thread, or an empty region if none
         region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
@@ -369,11 +387,12 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
     """
     Provides a prompt of text/code for Gemini to complete.
     """
+
     def get_command_info(self) -> str:
         # Returns the command name, which is also the settings key and label.
         return "completions"
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API completion request.
         """
@@ -383,17 +402,23 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(syntax_name, content)}]
+                    "parts": [
+                        {
+                            "text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(
+                                syntax_name, content
+                            )
+                        }
+                    ],
                 }
             ],
             "generationConfig": {
                 "temperature": settingsc.get("temperature", 0),
                 "top_p": settingsc.get("top_p", 1),
                 "max_output_tokens": settingsc.get("max_tokens", 100),
-            }
+            },
         }
 
-    def on_api_success(self, thread: 'AsyncGemini'):
+    def on_api_success(self, thread: "AsyncGemini") -> None:
         """
         Inserts the completion text into the view.
         """
@@ -404,10 +429,10 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
                 "replace_text",
                 {
                     "region": [thread.region.begin(), thread.region.end()],
-                    "text": "{}{}".format(thread.preText, thread.result)
+                    "text": "{}{}".format(thread.preText, thread.result),
                 },
             ),
-            0
+            0,
         )
         sublime.status_message("Gemini AI completion inserted.")
 
@@ -431,39 +456,48 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
         self._prepare_and_run_gemini_thread(content)
 
 
-class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from EditGeminiCommand to InstructGeminiCommand
+class InstructGeminiCommand(GeminiBaseAiCommand):
     """
     Provides a prompt of text/code to Gemini along with an instruction of how to
     modify the prompt, while trying to keep the functionality the same.
     """
+
     def get_command_info(self) -> str:
         # Returns the command name, which is also the settings key and label.
         return "instruct"
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API instruct request.
         """
         settingse: Dict[str, Any] = get_setting(self.view, self.get_command_info())
 
         # The preText for the prompt is constructed here for the AI model's input
-        preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
+        preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
+            syntax_name, syntax_name.lower(), content, user_input
+        )
 
         return {
-            "model": settingse.get("model", "gemini-2.5-flash"), # Changed 'edit_model' to 'model' for consistency
+            "model": settingse.get("model", "gemini-2.5-flash"),
             "contents": [
                 {
                     "role": "user",
-                    "parts": [{"text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(syntax_name, preText_for_prompt)}]
+                    "parts": [
+                        {
+                            "text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(
+                                syntax_name, preText_for_prompt
+                            )
+                        }
+                    ],
                 }
             ],
             "generationConfig": {
                 "temperature": settingse.get("temperature", 0),
                 "top_p": settingse.get("top_p", 1),
-            }
+            },
         }
 
-    def on_api_success(self, thread: 'AsyncGemini'):
+    def on_api_success(self, thread: "AsyncGemini") -> None:
         """
         Opens a new tab with the instructed content.
         """
@@ -474,7 +508,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
                 "open_new_tab_with_content",
                 {"instruction": thread.preText, "text": thread.result},
             ),
-            100
+            100,
         )
         sublime.status_message("Gemini AI instruction opened in new tab.")
 
@@ -488,14 +522,14 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
 
         # Show the input panel
         _ = window.show_input_panel(
-            caption="Enter your instruction:", # Changed "prompt" to "instruction"
+            caption="Enter your instruction:",
             initial_text="",
             on_done=self.on_input_done,
             on_change=None,
-            on_cancel=self.on_input_cancel
+            on_cancel=self.on_input_cancel,
         )
 
-    def on_input_done(self, user_input: str):
+    def on_input_done(self, user_input: str) -> None:
         """
         Callback function executed when the user presses Enter in the input panel.
         Initiates the Gemini instruct request.
@@ -515,7 +549,9 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
         # If no selection, use the whole file.
         use_whole_file: bool = len(self.view.sel()) == 0 or self.view.sel()[0].empty()
 
-        region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0,0) # Default to empty region if no selection
+        region: sublime.Region = (
+            self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
+        )  # Default to empty region if no selection
         content: str = self.view.substr(region)
         if use_whole_file:
             content = whole_file_as_context(self.view)
@@ -523,7 +559,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
         # Call the base method to prepare and run the thread
         self._prepare_and_run_gemini_thread(content, user_input)
 
-    def on_input_cancel(self):
+    def on_input_cancel(self) -> None:
         """
         Callback function executed if the input panel is canceled.
         """
@@ -535,7 +571,8 @@ class ReplaceTextCommand(sublime_plugin.TextCommand):
     Simple command for inserting text into a view at a specified region.
     This command must be run on the main thread.
     """
-    def run(self, edit: sublime.Edit, region, text: str):
+
+    def run(self, edit: sublime.Edit, region: List[int], text: str) -> None:
         # Cast the input region list (e.g., [begin, end]) to a sublime.Region object
         sublime_region: sublime.Region = sublime.Region(*region)
         self.view.replace(edit, sublime_region, text)
@@ -546,12 +583,13 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
     A Sublime Text plugin command that opens a new empty tab
     and inserts content into it. This command must be run on the main thread.
     """
-    def run(self, edit: sublime.Edit, instruction: str, text: str):
-        window = self.view.window()
+
+    def run(self, edit: sublime.Edit, instruction: str, text: str) -> None:
+        window: Union[sublime.Window, None] = self.view.window()
         if not window:
             raise ValueError("No window found for creating the new tab.")
 
-        new_view = window.new_file(sublime.FORCE_GROUP)
+        new_view: sublime.View = window.new_file(sublime.FORCE_GROUP)
 
         new_view.set_name("Gemini Results")
 
@@ -562,16 +600,12 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
         # The arguments are 'characters' (the text to insert) and 'point' (where to insert, 0 for the beginning).
         new_view.run_command("insert", {"characters": "### User:\n\n{}\n\n---\n\n".format(instruction), "point": 0})
         sublime.set_timeout(
-            lambda: new_view.run_command("insert", {"characters": "### Results:\n\n{}".format(text), "point": len(instruction) + 4}),
-            100
+            lambda: new_view.run_command(
+                "insert", {"characters": "### Results:\n\n{}".format(text), "point": len(instruction) + 4}
+            ),
+            100,
         )
-        sublime.set_timeout(
-            lambda: new_view.run_command("move_to", {"to": "bof"}),
-            200
-        )
-        sublime.set_timeout(
-            lambda: new_view.run_command("reindent", {"single_line": False}),
-            300
-        )
+        sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 200)
+        sublime.set_timeout(lambda: new_view.run_command("reindent", {"single_line": False}), 300)
 
         window.focus_view(new_view)

@@ -534,7 +534,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
         if not window:
             raise ValueError("No window found for creating the new tab.")
 
-        new_view = window.new_file(sublime.ADD_TO_SELECTION)
+        new_view = window.new_file(sublime.FORCE_GROUP)
 
         new_view.set_name("Gemini Results")
 

@@ -21,7 +21,7 @@ dev = [
 [tool.pyright]
 pythonVersion = '3.8'
 # Specify your source directory
-include = ["."]
+include = [".", "./plugin"]
 reportMissingModuleSource = "none"
 reportIncompatibleMethodOverride = "none"
 stubPath = "../typings"

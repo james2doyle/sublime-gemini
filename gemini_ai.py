@@ -358,7 +358,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         preText: str = ""
         if settings_key == "completions" and command_settings.get("keep_prompt_text", False):
             preText = content
-        elif settings_key == "instruct": # Changed "edits" to "instruct"
+        elif settings_key == "instruct":
              # For instruct, preText is the instruction + original content for the new tab
             preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
@@ -445,10 +445,10 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
     modify the prompt, while trying to keep the functionality the same.
     """
     def get_settings_key(self) -> str:
-        return "instruct" # Changed "edits" to "instruct"
+        return "instruct"
 
     def get_command_label(self) -> str:
-        return "instruct" # Changed "edits" to "instruct"
+        return "instruct"
 
     def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
         """
@@ -477,7 +477,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
         """
         Opens a new tab with the instructed content.
         """
-        logger.debug("Running command for `instruct` with content: {}".format(thread.result)) # Changed "edits" to "instruct"
+        logger.debug("Running command for `instruct` with content: {}".format(thread.result))
         # Ensure UI updates are done on the main thread
         sublime.set_timeout(
             lambda: self.view.run_command(

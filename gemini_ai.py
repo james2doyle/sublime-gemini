@@ -11,12 +11,7 @@ import sublime_plugin
 # --- Configuration ---
 SETTINGS_FILE = "gemini-ai.sublime-settings"
 
-# Configure logging
-# By default, Sublime Text captures logs from the Python logging module.
-# You can set the logging level as needed.
 logging.basicConfig(level=logging.DEBUG)
-
-# Get a logger for your plugin
 logger = logging.getLogger("GeminiAIPlugin")
 
 
@@ -98,7 +93,7 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
         # If we ran out of time, let user know, stop checking on the thread
         if seconds > max_seconds:
-            logger.debug("Thread for %s is maxed out", thread.endpoint)
+            logger.debug("Thread for {} is maxed out".format(label))
             msg: str = "Gemini ran out of time! {}s".format(max_seconds)
             sublime.status_message(msg)
             return
@@ -106,7 +101,7 @@ class GeminiCommand(sublime_plugin.TextCommand):
         # While the thread is running, show them some feedback,
         # and keep checking on the thread
         if thread.running:
-            logger.debug("Thread for %s is running", thread.endpoint)
+            logger.debug("Thread for {} is running".format(label))
             msg: str = "Gemini is thinking, one moment... ({}/{}s)".format(seconds, max_seconds)
             sublime.status_message(msg)
             # Wait a second, then check on it again
@@ -115,13 +110,13 @@ class GeminiCommand(sublime_plugin.TextCommand):
 
         # If the thread finished but encountered an error
         if thread.error:
-            logger.error("Thread for %s finished with error: %s", thread.endpoint, thread.error)
-            sublime.error_message(f"Gemini AI Error: {thread.error}")
+            logger.error("Thread for {} finished with error: {}".format(label, thread.error))
+            sublime.error_message("Gemini AI Error: {}".format(thread.error))
             return
 
         # If we finished with no result (and no explicit error), something is wrong
         if not thread.result:
-            logger.debug("Thread for %s is done, but no result found.", thread.endpoint)
+            logger.debug("Thread for {} is done, but no result found.".format(label))
             sublime.status_message("Something is wrong with Gemini - aborting (no result)")
             return
 
@@ -140,7 +135,6 @@ class GeminiCommand(sublime_plugin.TextCommand):
                 0
             )
             sublime.status_message("Gemini AI completion inserted.")
-
 
         if label == "edits":
             logger.debug("Running command for `edits` with content: {}".format(thread.result))
@@ -184,27 +178,26 @@ class CompletionGeminiCommand(GeminiCommand):
 
         if syntax_path:
             # Print the syntax path to the Sublime Text console
-            logger.debug("Current syntax path: %s", syntax_path)
+            logger.debug("Current syntax path: {}".format(syntax_path))
         else:
             logger.debug("No syntax defined for the current view.")
 
         syntax_name: str = syntax_path.split('/').pop().split('.')[0]
-        logger.debug("Current syntax name: %s", syntax_name)
+        logger.debug("Current syntax name: {}".format(syntax_name))
 
         data: Dict[str, Any] = {
             "model": settingsc.get("model", "gemini-2.5-flash"),
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks".format(syntax_name) },
+            "contents": [
                 {
                     "role": "user",
-                    "content": "{}".format(self.view.substr(region))
+                    "parts": [{"text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(syntax_name, self.view.substr(region))}]
                 }
             ],
-            "max_tokens": settingsc.get("max_tokens", 100),
-            "temperature": settingsc.get("temperature", 0),
-            "top_p": settingsc.get("top_p", 1),
+            "generationConfig": {
+                "temperature": settingsc.get("temperature", 0),
+                "top_p": settingsc.get("top_p", 1),
+                "max_output_tokens": settingsc.get("max_tokens", 100),
+            }
         }
 
         hasPreText: bool = settingsc.get("keep_prompt_text", False)
@@ -212,7 +205,7 @@ class CompletionGeminiCommand(GeminiCommand):
         if hasPreText:
             preText = self.view.substr(region)
 
-        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, preText)
+        thread: AsyncGemini = AsyncGemini(self.view, region, "generateContent", data, preText)
 
         # Perform the async fetching and editing
         thread.start()
@@ -275,37 +268,33 @@ class EditGeminiCommand(GeminiCommand):
 
         if syntax_path:
             # Print the syntax path to the Sublime Text console
-            logger.debug("Current syntax path: %s", syntax_path)
+            logger.debug("Current syntax path: {}".format(syntax_path))
         else:
             logger.debug("No syntax defined for the current view.")
 
         syntax_name: str = syntax_path.split('/').pop().split('.')[0]
-        logger.debug("Current syntax name: %s", syntax_name)
+        logger.debug("Current syntax name: {}".format(syntax_name))
 
         preText: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
+        # Gemini API expects 'contents' with 'role' and 'parts'
+        # The 'system' role is often implicitly handled or part of the first 'user' turn
+        # for simple generateContent calls. For multi-turn, it's more explicit.
         data: Dict[str, Any] = {
             "model": settingse.get("edit_model", "gemini-2.5-flash"),
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.".format(syntax_name)
-                },
+            "contents": [
                 {
                     "role": "user",
-                    "content": preText
+                    "parts": [{"text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(syntax_name, preText)}]
                 }
             ],
-            "temperature": settingse.get("temperature", 0),
-            "top_p": settingse.get("top_p", 1),
+            "generationConfig": {
+                "temperature": settingse.get("temperature", 0),
+                "top_p": settingse.get("top_p", 1),
+            }
         }
 
-        # Note: The original code passed "completions" as endpoint for edits.
-        # It should likely be "edits" or a different endpoint if the API supports it.
-        # Assuming the API endpoint for edits is still under "chat" and uses "completions" internally
-        # or that the instruction in the message handles the "edit" functionality.
-        # If the Gemini API has a dedicated "edits" endpoint, this might need adjustment.
-        thread: AsyncGemini = AsyncGemini(self.view, region, "completions", data, preText) # Keeping "completions" as per original logic
+        thread: AsyncGemini = AsyncGemini(self.view, region, "generateContent", data, preText)
 
         # Perform the async fetching and editing
         thread.start()
@@ -330,7 +319,7 @@ class AsyncGemini(threading.Thread):
         Args:
             view: The Sublime Text view associated with the command.
             region: The sublime.Region object representing the highlighted text.
-            endpoint: The API endpoint to hit (e.g., "completions").
+            endpoint: The API endpoint to hit (e.g., "generateContent").
             data: The payload data for the API request.
             preText: Text to prepend to the result (e.g., original prompt text).
         """
@@ -356,7 +345,7 @@ class AsyncGemini(threading.Thread):
             self.result = self.get_gemini_response()
         except Exception as e:
             self.error = str(e)
-            logger.error("Error in AsyncGemini thread: %s", self.error)
+            logger.error("Error in AsyncGemini thread: {}".format(self.error))
         finally:
             self.running = False
 
@@ -367,6 +356,7 @@ class AsyncGemini(threading.Thread):
         """
         token: Union[str, None] = get_setting(self.view, "api_token", None)
         hostname: str = get_setting(self.view, "hostname", "generativelanguage.googleapis.com")
+        model_name: str = self.data.get("model", "gemini-2.5-flash")
 
         # Ensure token is not None before proceeding
         if token is None:
@@ -374,72 +364,84 @@ class AsyncGemini(threading.Thread):
 
         # Using http.client for HTTPS connection
         conn: http.client.HTTPSConnection = http.client.HTTPSConnection(hostname)
+
+        # For native Gemini API, API key is usually in the URL query parameter
+        # and Content-Type is application/json.
         headers: Dict[str, str] = {
-            "Authorization": "Bearer " + token,
             "Content-Type": "application/json"
         }
 
         # Prepare the data payload as a JSON string
-        data_payload: str = json.dumps(self.data)
-        logger.debug("API request data: %s", data_payload)
+        # Remove 'model' from data_payload as it's in the URL
+        payload_for_body = self.data.copy()
+        if "model" in payload_for_body:
+            del payload_for_body["model"]
 
-        # The endpoint path for Gemini API is typically /v1beta/models/{model_id}:generateContent
-        # The original code uses /v1beta/openai/chat/{self.endpoint} which might be an older
-        # or specific proxy setup. Assuming the current setup expects this path.
-        # If you are directly calling Google's Gemini API, the path should be:
-        # "/v1beta/models/{model_name}:generateContent?key={API_KEY}"
-        # Given the `hostname` is `generativelanguage.googleapis.com` and `Authorization: Bearer {token}`
-        # it suggests a direct Google API call. The `self.endpoint` being "completions"
-        # implies a custom mapping. I will keep the original path structure but note this.
+        data_payload: str = json.dumps(payload_for_body)
+        logger.debug("API request data: {}".format(data_payload))
 
-        # Original: conn.request("POST", "/v1beta/openai/chat/{}".format(self.endpoint), data_payload, headers)
-        # More standard Gemini API path:
-        # model_name = self.data.get("model", "gemini-2.5-flash")
-        # conn.request("POST", f"/v1beta/models/{model_name}:generateContent", data_payload, headers)
-        # However, the current setup uses Authorization: Bearer, which is common for OAuth.
-        # If `api_token` is truly a bearer token for a custom proxy or an OAuth token,
-        # the original path might be correct for that specific setup.
-        # I will stick to the original path for now to minimize breaking changes.
-        conn.request("POST", "/v1beta/openai/chat/{}".format(self.endpoint), data_payload, headers)
+        # Construct the native Gemini API endpoint path
+        # Example: POST /v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_API_KEY
+        path = "/v1beta/models/{}:{}?key={}".format(model_name, self.endpoint, token)
+        logger.debug("API request path: {}".format(path))
+
+        conn.request("POST", path, data_payload, headers)
 
         response: http.client.HTTPResponse = conn.getresponse()
 
         # Decode the response and load the JSON
         response_body: str = response.read().decode('utf-8')
         response_dict: Dict[str, Any] = json.loads(response_body)
-        logger.debug("API response data: %s", response_dict)
+        logger.debug("API response data: {}".format(response_dict))
 
         if response_dict.get("error", None):
             # If the API returns an error, raise it
             error_details = response_dict["error"].get("message", "Unknown API error")
-            raise ValueError(f"API Error: {error_details}")
+            raise ValueError("API Error: {}".format(error_details))
         else:
-            # Type hinting the retrieved choice and usage data
-            # Assuming the response structure for choices is consistent with OpenAI-like models
-            # For direct Gemini API, the structure is usually `candidates[0].content.parts[0].text`
-            # The current structure `choices[0].message.content` suggests an OpenAI compatibility layer.
-            choices: list[Dict[str, Any]] = response_dict.get("choices", [])
-            if not choices:
-                raise ValueError("No choices found in API response.")
+            # Check for prompt feedback (e.g., safety issues with the input)
+            prompt_feedback = response_dict.get("promptFeedback", {})
+            safety_ratings = prompt_feedback.get("safetyRatings", [])
+            for rating in safety_ratings:
+                if rating.get("blocked"):
+                    raise ValueError("Prompt blocked by safety filters: {}".format(rating.get("reason", "Unknown reason")))
 
-            choice: Dict[str, Any] = choices[0]
+            # Check for candidates and their finish reasons first
+            candidates: list[Dict[str, Any]] = response_dict.get("candidates", [])
+            if not candidates:
+                # If no candidates and no prompt feedback, it's an unexpected empty response
+                raise ValueError("Gemini did not return any candidates. The model might have generated no response or encountered an internal issue.")
 
-            finished = choice.get("finish_reason", None)
-            # ran out of tokens or hit the max amount
-            if finished == "length":
-                raise ValueError("Finished early because of {}.".format(finished))
+            first_candidate: Dict[str, Any] = candidates[0]
+            finish_reason = first_candidate.get("finishReason", None) # Changed from 'finish_reason' to 'finishReason' as per log
 
-            message: Dict[str, Any] = choice.get("message", {})
-            ai_text: str = message.get("content", "")
+            if finish_reason:
+                # Provide more specific messages for different finish reasons
+                if finish_reason == "STOP":
+                    # This means the model finished normally, but might not have content if output was short
+                    pass # Will proceed to check content_parts
+                elif finish_reason == "MAX_TOKENS":
+                    # Get the total token count from usageMetadata
+                    usage_metadata = response_dict.get("usageMetadata", {})
+                    total_token_count = usage_metadata.get("totalTokenCount", 0)
+                    raise ValueError("Gemini finished early due to max tokens limit. Used {} tokens. Try increasing 'max_tokens' in settings.".format(total_token_count))
+                elif finish_reason == "SAFETY":
+                    raise ValueError("Gemini response blocked by safety filters.")
+                elif finish_reason == "RECITATION":
+                    raise ValueError("Gemini response blocked due to recitation policy.")
+                else:
+                    raise ValueError("Gemini finished early with reason: {}".format(finish_reason))
+
+            content_parts: list[Dict[str, Any]] = first_candidate.get("content", {}).get("parts", [])
+
+            if not content_parts:
+                # This error is now more specific as finish_reason would have been handled
+                raise ValueError("No content parts found in AI response. This could be due to an empty model response even after successful generation.")
+
+            ai_text: str = content_parts[0].get("text", "")
 
             if not ai_text:
-                raise ValueError("No content found in AI response message.")
-
-            # Accessing usage information
-            usage_info: Dict[str, int] = response_dict.get("usage", {})
-            total_tokens: int = usage_info.get("total_tokens", 0)
-
-            sublime.status_message("Gemini tokens used: " + str(total_tokens))
+                raise ValueError("No text content found in AI response part.")
 
             return ai_text
 

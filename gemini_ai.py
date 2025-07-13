@@ -124,8 +124,9 @@ class AsyncGemini(threading.Thread):
         token: Union[str, None] = get_setting(self.view, "api_token", None)
         hostname: str = get_setting(self.view, "hostname", "generativelanguage.googleapis.com")
         model_name: str = self.data.get("model", "gemini-2.5-flash") # Model name from data
-        # The endpoint is always 'generateContent' for these commands
-        api_endpoint: str = "generateContent"
+        # The API endpoint path is now hardcoded as per the task.
+        # It always points to the generateContent endpoint for the specified model version.
+        api_path: str = "/v1beta/models/{}:generateContent".format(model_name)
 
         # Ensure token is not None before proceeding
         if token is None:
@@ -147,12 +148,11 @@ class AsyncGemini(threading.Thread):
         data_payload: str = json.dumps(payload_for_body)
         logger.debug("API request data: {}".format(data_payload))
 
-        # Construct the native Gemini API endpoint path
-        # Example: POST /v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_API_KEY
-        path = "/v1beta/models/{}:{}?key={}".format(model_name, api_endpoint, token)
-        logger.debug("API request path: {}".format(path))
+        # Construct the full URL path including the API key
+        full_path = "{}?key={}".format(api_path, token)
+        logger.debug("API request path: {}".format(full_path))
 
-        conn.request("POST", path, data_payload, headers)
+        conn.request("POST", full_path, data_payload, headers)
 
         response: http.client.HTTPResponse = conn.getresponse()
 

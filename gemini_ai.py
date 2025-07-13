@@ -11,6 +11,8 @@ import sublime_plugin
 # --- Configuration ---
 SETTINGS_FILE = "gemini-ai.sublime-settings"
 
+# Configure logging to be toggled by settings later
+# For now, keep it as DEBUG for development
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("GeminiAIPlugin")
 
@@ -48,285 +50,24 @@ def whole_file_as_context(view: sublime.View) -> str:
     return view.substr(full_region)
 
 
-class GeminiCommand(sublime_plugin.TextCommand):
-    """
-    Base class for Gemini AI commands, providing common setup and thread handling.
-    """
-    def check_setup(self):
-        """
-        Performs checks to ensure Gemini AI can run, such as API key presence
-        and selection validity.
-        Raises ValueError if setup is incomplete or invalid.
-        """
-        key: Union[str, None] = get_setting(self.view, "api_token")
-
-        if key is None:
-            msg: str = "Please put an 'api_token' in the GeminiAI package settings"
-            sublime.error_message(msg) # Use error_message for critical setup issues
-            raise ValueError(msg)
-
-        no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
-
-        # Ensure a selection exists before accessing it
-        if not self.view.sel():
-            if no_empty_selection:
-                msg = "Please highlight a section of code."
-                sublime.status_message(msg)
-                raise ValueError(msg)
-            # If no_empty_selection is False and there is no selection,
-            # we can proceed, assuming the command can handle an empty region.
-            # For commands like 'completions', an empty selection might still be an issue.
-            # This check is primarily for commands that require a specific region.
-
-        # Check if the primary selection is empty when it's not allowed
-        if self.view.sel() and self.view.sel()[0].empty() and no_empty_selection:
-            msg = "Please highlight a section of code."
-            sublime.status_message(msg)
-            raise ValueError(msg)
-
-    def handle_thread(self, thread: 'AsyncGemini', label: str, seconds: int = 0):
-        """
-        Recursively checks the status of the AsyncGemini thread and updates the UI
-        or shows feedback. Dispatches UI updates to the main thread.
-        """
-        max_seconds: int = get_setting(self.view, "max_seconds", 60)
-
-        # If we ran out of time, let user know, stop checking on the thread
-        if seconds > max_seconds:
-            logger.debug("Thread for {} is maxed out".format(label))
-            msg: str = "Gemini ran out of time! {}s".format(max_seconds)
-            sublime.status_message(msg)
-            return
-
-        # While the thread is running, show them some feedback,
-        # and keep checking on the thread
-        if thread.running:
-            logger.debug("Thread for {} is running".format(label))
-            msg: str = "Gemini is thinking, one moment... ({}/{}s)".format(seconds, max_seconds)
-            sublime.status_message(msg)
-            # Wait a second, then check on it again
-            sublime.set_timeout(lambda: self.handle_thread(thread, label, seconds + 1), 1000)
-            return
-
-        # If the thread finished but encountered an error
-        if thread.error:
-            logger.error("Thread for {} finished with error: {}".format(label, thread.error))
-            sublime.error_message("Gemini AI Error: {}".format(thread.error))
-            return
-
-        # If we finished with no result (and no explicit error), something is wrong
-        if not thread.result:
-            logger.debug("Thread for {} is done, but no result found.".format(label))
-            sublime.status_message("Something is wrong with Gemini - aborting (no result)")
-            return
-
-        # If the thread finished successfully and has a result, update the UI
-        if label == "completions":
-            logger.debug("Running command for `completions` with content: {}".format(thread.result))
-            # Ensure UI updates are done on the main thread
-            sublime.set_timeout(
-                lambda: self.view.run_command(
-                    "replace_text",
-                    {
-                        "region": [thread.region.begin(), thread.region.end()],
-                        "text": "{}{}".format(thread.preText, thread.result)
-                    },
-                ),
-                0
-            )
-            sublime.status_message("Gemini AI completion inserted.")
-
-        if label == "edits":
-            logger.debug("Running command for `edits` with content: {}".format(thread.result))
-            # Ensure UI updates are done on the main thread
-            sublime.set_timeout(
-                lambda: self.view.run_command(
-                    "open_new_tab_with_content",
-                    {"instruction": thread.preText, "text": thread.result},
-                ),
-                100
-            )
-            sublime.status_message("Gemini AI edit opened in new tab.")
-
-
-class CompletionGeminiCommand(GeminiCommand):
-    """
-    Provides a prompt of text/code for Gemini to complete.
-    """
-    def run(self, edit: sublime.Edit):
-        try:
-            # Check config and prompt
-            self.check_setup()
-        except ValueError as e:
-            # check_setup already displays status/error messages
-            return
-
-        no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
-
-        # Check if there are selections and if no_empty_selection is enabled
-        if len(self.view.sel()) == 0 and no_empty_selection:
-            msg: str = "Please highlight only 1 chunk of code."
-            sublime.status_message(msg)
-            return
-
-        # Gather data needed for gemini, prep thread to run async
-        region: sublime.Region = self.view.sel()[0]
-        settingsc: Dict[str, Any] = get_setting(self.view, "completions")
-
-        # Retrieve the syntax setting
-        syntax_path: str = self.view.settings().get('syntax')
-
-        if syntax_path:
-            # Print the syntax path to the Sublime Text console
-            logger.debug("Current syntax path: {}".format(syntax_path))
-        else:
-            logger.debug("No syntax defined for the current view.")
-
-        syntax_name: str = syntax_path.split('/').pop().split('.')[0]
-        logger.debug("Current syntax name: {}".format(syntax_name))
-
-        data: Dict[str, Any] = {
-            "model": settingsc.get("model", "gemini-2.5-flash"),
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(syntax_name, self.view.substr(region))}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": settingsc.get("temperature", 0),
-                "top_p": settingsc.get("top_p", 1),
-                "max_output_tokens": settingsc.get("max_tokens", 100),
-            }
-        }
-
-        hasPreText: bool = settingsc.get("keep_prompt_text", False)
-        preText: str = ""
-        if hasPreText:
-            preText = self.view.substr(region)
-
-        thread: AsyncGemini = AsyncGemini(self.view, region, "generateContent", data, preText)
-
-        # Perform the async fetching and editing
-        thread.start()
-        self.handle_thread(thread, "completions")
-
-
-class EditGeminiCommand(GeminiCommand):
-    """
-    Provides a prompt of text/code to Gemini along with an instruction of how to
-    modify the prompt, while trying to keep the functionality the same.
-    """
-    def run(self, edit: sublime.Edit):
-        # Get the active window
-        window: Union[sublime.Window, None] = self.view.window()
-
-        # If there is no active window, we cannot proceed
-        if not window:
-            return
-
-        # Show the input panel
-        _ = window.show_input_panel(
-            caption="Enter your prompt:",
-            initial_text="",
-            on_done=self.on_input_done,
-            on_change=None,
-            on_cancel=self.on_input_cancel
-        )
-
-    def on_input_done(self, user_input: str):
-        """
-        Callback function executed when the user presses Enter in the input panel.
-        Initiates the Gemini edit request.
-        """
-        # Ensure we have a view
-        view: sublime.View = self.view
-        if not view:
-            return
-
-        try:
-            # Check config and prompt
-            self.check_setup()
-        except ValueError as e:
-            # check_setup already displays status/error messages
-            return
-
-        # Determine if we should use the whole file as context
-        # based on whether there is an active selection.
-        # If no selection, use the whole file.
-        use_whole_file: bool = len(self.view.sel()) == 0 or self.view.sel()[0].empty()
-
-        region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0,0) # Default to empty region if no selection
-        content: str = self.view.substr(region)
-        if use_whole_file:
-            content = whole_file_as_context(self.view)
-
-        settingse: Dict[str, Any] = get_setting(self.view, "edits")
-
-        # Retrieve the syntax setting
-        syntax_path: str = self.view.settings().get('syntax')
-
-        if syntax_path:
-            # Print the syntax path to the Sublime Text console
-            logger.debug("Current syntax path: {}".format(syntax_path))
-        else:
-            logger.debug("No syntax defined for the current view.")
-
-        syntax_name: str = syntax_path.split('/').pop().split('.')[0]
-        logger.debug("Current syntax name: {}".format(syntax_name))
-
-        preText: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
-
-        # Gemini API expects 'contents' with 'role' and 'parts'
-        # The 'system' role is often implicitly handled or part of the first 'user' turn
-        # for simple generateContent calls. For multi-turn, it's more explicit.
-        data: Dict[str, Any] = {
-            "model": settingse.get("edit_model", "gemini-2.5-flash"),
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(syntax_name, preText)}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": settingse.get("temperature", 0),
-                "top_p": settingse.get("top_p", 1),
-            }
-        }
-
-        thread: AsyncGemini = AsyncGemini(self.view, region, "generateContent", data, preText)
-
-        # Perform the async fetching and editing
-        thread.start()
-        self.handle_thread(thread, "edits")
-
-    def on_input_cancel(self):
-        """
-        Callback function executed if the input panel is canceled.
-        """
-        sublime.status_message("Input canceled.")
-
-
 class AsyncGemini(threading.Thread):
     """
     A simple async thread class for accessing the Gemini API and waiting for a response.
     """
 
-    def __init__(self, view: sublime.View, region: sublime.Region, endpoint: str, data: Dict[str, Any], preText: str):
+    def __init__(self, view: sublime.View, region: sublime.Region, data: Dict[str, Any], preText: str):
         """
         Initializes the AsyncGemini thread.
 
         Args:
             view: The Sublime Text view associated with the command.
             region: The sublime.Region object representing the highlighted text.
-            endpoint: The API endpoint to hit (e.g., "generateContent").
             data: The payload data for the API request.
             preText: Text to prepend to the result (e.g., original prompt text).
         """
         super().__init__()
         self.view: sublime.View = view
         self.region: sublime.Region = region
-        self.endpoint: str = endpoint
         self.data: Dict[str, Any] = data
         self.preText: str = preText
         self.running: bool = False
@@ -356,7 +97,9 @@ class AsyncGemini(threading.Thread):
         """
         token: Union[str, None] = get_setting(self.view, "api_token", None)
         hostname: str = get_setting(self.view, "hostname", "generativelanguage.googleapis.com")
-        model_name: str = self.data.get("model", "gemini-2.5-flash")
+        model_name: str = self.data.get("model", "gemini-2.5-flash") # Model name from data
+        # The endpoint is always 'generateContent' for these commands
+        api_endpoint: str = "generateContent"
 
         # Ensure token is not None before proceeding
         if token is None:
@@ -365,14 +108,12 @@ class AsyncGemini(threading.Thread):
         # Using http.client for HTTPS connection
         conn: http.client.HTTPSConnection = http.client.HTTPSConnection(hostname)
 
-        # For native Gemini API, API key is usually in the URL query parameter
-        # and Content-Type is application/json.
         headers: Dict[str, str] = {
             "Content-Type": "application/json"
         }
 
         # Prepare the data payload as a JSON string
-        # Remove 'model' from data_payload as it's in the URL
+        # Remove 'model' from payload_for_body as it's used in the URL
         payload_for_body = self.data.copy()
         if "model" in payload_for_body:
             del payload_for_body["model"]
@@ -382,7 +123,7 @@ class AsyncGemini(threading.Thread):
 
         # Construct the native Gemini API endpoint path
         # Example: POST /v1beta/models/gemini-2.5-flash:generateContent?key=YOUR_API_KEY
-        path = "/v1beta/models/{}:{}?key={}".format(model_name, self.endpoint, token)
+        path = "/v1beta/models/{}:{}?key={}".format(model_name, api_endpoint, token)
         logger.debug("API request path: {}".format(path))
 
         conn.request("POST", path, data_payload, headers)
@@ -446,6 +187,332 @@ class AsyncGemini(threading.Thread):
             return ai_text
 
 
+class GeminiCommand(sublime_plugin.TextCommand):
+    """
+    Base class for Gemini AI commands, providing common setup and thread handling.
+    """
+    def check_setup(self):
+        """
+        Performs checks to ensure Gemini AI can run, such as API key presence
+        and selection validity.
+        Raises ValueError if setup is incomplete or invalid.
+        """
+        key: Union[str, None] = get_setting(self.view, "api_token")
+
+        if key is None:
+            msg: str = "Please put an 'api_token' in the GeminiAI package settings"
+            sublime.error_message(msg) # Use error_message for critical setup issues
+            raise ValueError(msg)
+
+        no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
+
+        # Ensure a selection exists before accessing it
+        if not self.view.sel():
+            if no_empty_selection:
+                msg = "Please highlight a section of code."
+                sublime.status_message(msg)
+                raise ValueError(msg)
+            # If no_empty_selection is False and there is no selection,
+            # we can proceed, assuming the command can handle an empty region.
+            # For commands like 'completions', an empty selection might still be an issue.
+            # This check is primarily for commands that require a specific region.
+
+        # Check if the primary selection is empty when it's not allowed
+        if self.view.sel() and self.view.sel()[0].empty() and no_empty_selection:
+            msg = "Please highlight a section of code."
+            sublime.status_message(msg)
+            raise ValueError(msg)
+
+    def handle_thread(self, thread: 'AsyncGemini', label: str, on_success_callback, seconds: int = 0):
+        """
+        Recursively checks the status of the AsyncGemini thread and updates the UI
+        or shows feedback. Dispatches UI updates to the main thread.
+
+        Args:
+            thread: The AsyncGemini thread instance.
+            label: A string label for the command (e.g., "completions", "edits").
+            on_success_callback: A callable function to execute when the thread finishes successfully.
+                                 It will receive the thread instance as an argument.
+            seconds: Current elapsed time for the timeout.
+        """
+        max_seconds: int = get_setting(self.view, "max_seconds", 60)
+
+        # If we ran out of time, let user know, stop checking on the thread
+        if seconds > max_seconds:
+            logger.debug("Thread for {} is maxed out".format(label))
+            msg: str = "Gemini ran out of time! {}s".format(max_seconds)
+            sublime.status_message(msg)
+            return
+
+        # While the thread is running, show them some feedback,
+        # and keep checking on the thread
+        if thread.running:
+            logger.debug("Thread for {} is running".format(label))
+            msg: str = "Gemini is thinking, one moment... ({}/{}s)".format(seconds, max_seconds)
+            sublime.status_message(msg)
+            # Wait a second, then check on it again
+            sublime.set_timeout(lambda: self.handle_thread(thread, label, on_success_callback, seconds + 1), 1000)
+            return
+
+        # If the thread finished but encountered an error
+        if thread.error:
+            logger.error("Thread for {} finished with error: {}".format(label, thread.error))
+            sublime.error_message("Gemini AI Error: {}".format(thread.error))
+            return
+
+        # If we finished with no result (and no explicit error), something is wrong
+        if not thread.result:
+            logger.debug("Thread for {} is done, but no result found.".format(label))
+            sublime.status_message("Something is wrong with Gemini - aborting (no result)")
+            return
+
+        # If the thread finished successfully and has a result, call the success callback
+        logger.debug("Thread for {} finished successfully. Calling on_success_callback.".format(label))
+        sublime.set_timeout(lambda: on_success_callback(thread), 0)
+
+
+class GeminiBaseAiCommand(GeminiCommand):
+    """
+    Abstract base class for Gemini AI commands, providing common logic for
+    preparing data and handling successful API responses.
+    """
+
+    def get_settings_key(self) -> str:
+        """
+        Returns the key used to retrieve command-specific settings (e.g., "completions", "edits").
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement get_settings_key()")
+
+    def get_command_label(self) -> str:
+        """
+        Returns a label for the command, used in status messages and logging.
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement get_command_label()")
+
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+        """
+        Constructs the data payload for the Gemini API request.
+        Must be implemented by subclasses.
+
+        Args:
+            content: The selected text or whole file content.
+            syntax_name: The name of the current file's syntax.
+            user_input: Optional user input for commands like 'edit'.
+        """
+        raise NotImplementedError("Subclasses must implement get_prompt_data()")
+
+    def on_api_success(self, thread: 'AsyncGemini'):
+        """
+        Callback executed when the AsyncGemini thread finishes successfully.
+        Contains the logic for handling the API response (e.g., inserting text,
+        opening new tab). Must be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement on_api_success()")
+
+    def _prepare_and_run_gemini_thread(self, content: str, user_input: str = None):
+        """
+        Internal method to prepare the data, create the thread, and start monitoring it.
+        """
+        settings_key = self.get_settings_key()
+        command_label = self.get_command_label()
+        command_settings: Dict[str, Any] = get_setting(self.view, settings_key)
+
+        syntax_path: str = self.view.settings().get('syntax')
+        syntax_name: str = syntax_path.split('/').pop().split('.')[0] if syntax_path else "plain text"
+        logger.debug("Current syntax name: {}".format(syntax_name))
+
+        # Get prompt data from subclass
+        data: Dict[str, Any] = self.get_prompt_data(content, syntax_name, user_input)
+
+        # Handle 'preText' which is passed to the AsyncGemini thread
+        # This 'preText' is used by the success callback (e.g., for open_new_tab_with_content)
+        preText: str = ""
+        if settings_key == "completions" and command_settings.get("keep_prompt_text", False):
+            preText = content
+        elif settings_key == "edits":
+             # For edits, preText is the instruction + original content for the new tab
+            preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
+
+        # Use the current selection region for the thread, or an empty region if none
+        region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
+
+        # Initialize and start the async thread
+        thread: AsyncGemini = AsyncGemini(self.view, region, data, preText)
+        thread.start()
+        self.handle_thread(thread, command_label, self.on_api_success)
+
+
+class CompletionGeminiCommand(GeminiBaseAiCommand):
+    """
+    Provides a prompt of text/code for Gemini to complete.
+    """
+    def get_settings_key(self) -> str:
+        return "completions"
+
+    def get_command_label(self) -> str:
+        return "completions"
+
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+        """
+        Constructs the data payload for the Gemini API completion request.
+        """
+        settingsc: Dict[str, Any] = get_setting(self.view, self.get_settings_key())
+        return {
+            "model": settingsc.get("model", "gemini-2.5-flash"),
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(syntax_name, content)}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": settingsc.get("temperature", 0),
+                "top_p": settingsc.get("top_p", 1),
+                "max_output_tokens": settingsc.get("max_tokens", 100),
+            }
+        }
+
+    def on_api_success(self, thread: 'AsyncGemini'):
+        """
+        Inserts the completion text into the view.
+        """
+        logger.debug("Running command for `completions` with content: {}".format(thread.result))
+        # Ensure UI updates are done on the main thread
+        sublime.set_timeout(
+            lambda: self.view.run_command(
+                "replace_text",
+                {
+                    "region": [thread.region.begin(), thread.region.end()],
+                    "text": "{}{}".format(thread.preText, thread.result)
+                },
+            ),
+            0
+        )
+        sublime.status_message("Gemini AI completion inserted.")
+
+    def run(self, edit: sublime.Edit):
+        try:
+            self.check_setup()
+        except ValueError:
+            return
+
+        no_empty_selection: bool = get_setting(self.view, "no_empty_selection", True)
+
+        # Check if there are selections and if no_empty_selection is enabled
+        if len(self.view.sel()) == 0 and no_empty_selection:
+            msg: str = "Please highlight only 1 chunk of code."
+            sublime.status_message(msg)
+            return
+
+        region: sublime.Region = self.view.sel()[0]
+        content: str = self.view.substr(region)
+
+        self._prepare_and_run_gemini_thread(content)
+
+
+class EditGeminiCommand(GeminiBaseAiCommand):
+    """
+    Provides a prompt of text/code to Gemini along with an instruction of how to
+    modify the prompt, while trying to keep the functionality the same.
+    """
+    def get_settings_key(self) -> str:
+        return "edits"
+
+    def get_command_label(self) -> str:
+        return "edits"
+
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
+        """
+        Constructs the data payload for the Gemini API edit request.
+        """
+        settingse: Dict[str, Any] = get_setting(self.view, self.get_settings_key())
+
+        # The preText for the prompt is constructed here for the AI model's input
+        preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
+
+        return {
+            "model": settingse.get("edit_model", "gemini-2.5-flash"), # Note: 'edit_model' for edits
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(syntax_name, preText_for_prompt)}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": settingse.get("temperature", 0),
+                "top_p": settingse.get("top_p", 1),
+            }
+        }
+
+    def on_api_success(self, thread: 'AsyncGemini'):
+        """
+        Opens a new tab with the edited content.
+        """
+        logger.debug("Running command for `edits` with content: {}".format(thread.result))
+        # Ensure UI updates are done on the main thread
+        sublime.set_timeout(
+            lambda: self.view.run_command(
+                "open_new_tab_with_content",
+                {"instruction": thread.preText, "text": thread.result},
+            ),
+            100
+        )
+        sublime.status_message("Gemini AI edit opened in new tab.")
+
+    def run(self, edit: sublime.Edit):
+        # Get the active window
+        window: Union[sublime.Window, None] = self.view.window()
+
+        # If there is no active window, we cannot proceed
+        if not window:
+            return
+
+        # Show the input panel
+        _ = window.show_input_panel(
+            caption="Enter your prompt:",
+            initial_text="",
+            on_done=self.on_input_done,
+            on_change=None,
+            on_cancel=self.on_input_cancel
+        )
+
+    def on_input_done(self, user_input: str):
+        """
+        Callback function executed when the user presses Enter in the input panel.
+        Initiates the Gemini edit request.
+        """
+        # Ensure we have a view
+        view: sublime.View = self.view
+        if not view:
+            return
+
+        try:
+            self.check_setup()
+        except ValueError:
+            return
+
+        # Determine if we should use the whole file as context
+        # based on whether there is an active selection.
+        # If no selection, use the whole file.
+        use_whole_file: bool = len(self.view.sel()) == 0 or self.view.sel()[0].empty()
+
+        region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0,0) # Default to empty region if no selection
+        content: str = self.view.substr(region)
+        if use_whole_file:
+            content = whole_file_as_context(self.view)
+
+        # Call the base method to prepare and run the thread
+        self._prepare_and_run_gemini_thread(content, user_input)
+
+    def on_input_cancel(self):
+        """
+        Callback function executed if the input panel is canceled.
+        """
+        sublime.status_message("Input canceled.")
+
+
 class ReplaceTextCommand(sublime_plugin.TextCommand):
     """
     Simple command for inserting text into a view at a specified region.
@@ -472,7 +539,6 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
         new_view.set_name("Gemini Results")
 
         # Set syntax highlighting for better readability, e.g., Markdown
-        # new_view.assign_syntax('source:text.html.markdown')
         new_view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
 
         # We need to run the insert command on the new_view.

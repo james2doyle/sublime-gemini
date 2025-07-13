@@ -304,19 +304,13 @@ class GeminiBaseAiCommand(GeminiCommand):
     preparing data and handling successful API responses.
     """
 
-    def get_settings_key(self) -> str:
+    # Renamed to get_command_info to return both settings key and label
+    def get_command_info(self) -> str:
         """
-        Returns the key used to retrieve command-specific settings (e.g., "completions", "instruct").
-        Must be implemented by subclasses.
+        Returns the command name, which is used to retrieve command-specific settings
+        and for logging/status messages. Must be implemented by subclasses.
         """
-        raise NotImplementedError("Subclasses must implement get_settings_key()")
-
-    def get_command_label(self) -> str:
-        """
-        Returns a label for the command, used in status messages and logging.
-        Must be implemented by subclasses.
-        """
-        raise NotImplementedError("Subclasses must implement get_command_label()")
+        raise NotImplementedError("Subclasses must implement get_command_info()")
 
     def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
         """
@@ -342,9 +336,9 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         Internal method to prepare the data, create the thread, and start monitoring it.
         """
-        settings_key = self.get_settings_key()
-        command_label = self.get_command_label()
-        command_settings: Dict[str, Any] = get_setting(self.view, settings_key)
+        # Get command name from subclass
+        command_name = self.get_command_info()
+        command_settings: Dict[str, Any] = get_setting(self.view, command_name)
 
         syntax_path: str = self.view.settings().get('syntax')
         syntax_name: str = syntax_path.split('/').pop().split('.')[0] if syntax_path else "plain text"
@@ -356,9 +350,9 @@ class GeminiBaseAiCommand(GeminiCommand):
         # Handle 'preText' which is passed to the AsyncGemini thread
         # This 'preText' is used by the success callback (e.g., for open_new_tab_with_content)
         preText: str = ""
-        if settings_key == "completions" and command_settings.get("keep_prompt_text", False):
+        if command_name == "completions" and command_settings.get("keep_prompt_text", False):
             preText = content
-        elif settings_key == "instruct":
+        elif command_name == "instruct":
              # For instruct, preText is the instruction + original content for the new tab
             preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
 
@@ -368,24 +362,22 @@ class GeminiBaseAiCommand(GeminiCommand):
         # Initialize and start the async thread
         thread: AsyncGemini = AsyncGemini(self.view, region, data, preText)
         thread.start()
-        self.handle_thread(thread, command_label, self.on_api_success)
+        self.handle_thread(thread, command_name, self.on_api_success)
 
 
 class CompletionGeminiCommand(GeminiBaseAiCommand):
     """
     Provides a prompt of text/code for Gemini to complete.
     """
-    def get_settings_key(self) -> str:
-        return "completions"
-
-    def get_command_label(self) -> str:
+    def get_command_info(self) -> str:
+        # Returns the command name, which is also the settings key and label.
         return "completions"
 
     def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API completion request.
         """
-        settingsc: Dict[str, Any] = get_setting(self.view, self.get_settings_key())
+        settingsc: Dict[str, Any] = get_setting(self.view, self.get_command_info())
         return {
             "model": settingsc.get("model", "gemini-2.5-flash"),
             "contents": [
@@ -405,7 +397,7 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
         """
         Inserts the completion text into the view.
         """
-        logger.debug("Running command for `completions` with content: {}".format(thread.result))
+        logger.debug("Running command for `{}` with content: {}".format(self.get_command_info(), thread.result))
         # Ensure UI updates are done on the main thread
         sublime.set_timeout(
             lambda: self.view.run_command(
@@ -444,17 +436,15 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
     Provides a prompt of text/code to Gemini along with an instruction of how to
     modify the prompt, while trying to keep the functionality the same.
     """
-    def get_settings_key(self) -> str:
-        return "instruct"
-
-    def get_command_label(self) -> str:
+    def get_command_info(self) -> str:
+        # Returns the command name, which is also the settings key and label.
         return "instruct"
 
     def get_prompt_data(self, content: str, syntax_name: str, user_input: str = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API instruct request.
         """
-        settingse: Dict[str, Any] = get_setting(self.view, self.get_settings_key())
+        settingse: Dict[str, Any] = get_setting(self.view, self.get_command_info())
 
         # The preText for the prompt is constructed here for the AI model's input
         preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(syntax_name, syntax_name.lower(), content, user_input)
@@ -477,7 +467,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
         """
         Opens a new tab with the instructed content.
         """
-        logger.debug("Running command for `instruct` with content: {}".format(thread.result))
+        logger.debug("Running command for `{}` with content: {}".format(self.get_command_info(), thread.result))
         # Ensure UI updates are done on the main thread
         sublime.set_timeout(
             lambda: self.view.run_command(
@@ -486,7 +476,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand): # Changed class name from Edit
             ),
             100
         )
-        sublime.status_message("Gemini AI instruction opened in new tab.") # Changed "edit" to "instruction"
+        sublime.status_message("Gemini AI instruction opened in new tab.")
 
     def run(self, edit: sublime.Edit):
         # Get the active window

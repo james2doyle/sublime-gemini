@@ -1,10 +1,10 @@
 [
     {
         "caption": "Gemini AI: Complete Code",
-        "command": "gemini_ai_completion"
+        "command": "completion_gemini"
     },
     {
         "caption": "Gemini AI: Instruct Code",
-        "command": "gemini_ai_instruct"
+        "command": "instruct_gemini"
     }
 ]

@@ -11,6 +11,6 @@
     "keys": [
       "command+shift+e"
     ],
-    "command": "edit_gemini"
+    "command": "instruct_gemini"
   },
 ]

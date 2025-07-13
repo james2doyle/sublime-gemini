@@ -11,6 +11,6 @@
     "keys": [
       "ctrl+shift+end"
     ],
-    "command": "edit_gemini"
+    "command": "instruct_gemini"
   },
 ]

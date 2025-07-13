@@ -1,109 +1,88 @@
-# Sublime Gemini AI Plugin
+Sublime Gemini
+=================
 
 > This project is inspired by [necarlson97/codex-ai-sublime](https://github.com/necarlson97/codex-ai-sublime) but refactored with the help of Gemini
 
-A Sublime Text 3/4 plugin that integrates Google's Gemini AI for intelligent code completion and editing directly within your editor. Leverage Gemini's capabilities to generate code, refactor, or get suggestions based on your current file or selection.
+Sublime Gemini is a powerful Sublime Text plugin that integrates Google's Gemini AI directly into your editor, enhancing your coding workflow with intelligent assistance. From generating code snippets to refactoring and answering programming questions, Sublime Gemini brings the power of AI to your fingertips.
 
-## Features
+### Features
 
-- **Code Completion:** Get AI-generated code completions based on your highlighted selection.
-- **Code Editing/Refactoring:** Provide instructions to Gemini to modify selected code or even the entire file, with results presented in a new, clean tab for easy comparison.
-- **Asynchronous Operations:** All AI API calls are performed in a separate thread, ensuring Sublime Text's UI remains responsive.
-- **Configurable Settings:** Customize API keys, models, temperature, max tokens, and other parameters via `gemini-ai.sublime-settings`.
-- **Context-Aware Prompts:** Automatically includes the current file's syntax name in prompts for better AI responses.
-- **User Feedback:** Provides status messages and error alerts for a smooth user experience.
+**Intelligent Code Completion**: Get context-aware suggestions for your code.
+**Code Generation**: Generate functions, classes, or entire code blocks based on your natural language prompts.
+**Code Refactoring**: Ask Gemini to refactor selected code for improved readability, performance, or adherence to best practices.
+**Contextual Q&A**: Ask questions about your code, programming concepts, or general knowledge, and get instant answers within Sublime Text.
+**Error Explanation & Debugging Help**: Understand and resolve errors faster with AI-driven explanations and suggestions.
 
-## Installation
+### Commands
 
-1. **Manual Installation:**
+#### `completion_gemini`
 
-- Navigate to your Sublime Text `Packages` directory. You can find this by going to `Preferences > Browse Packages...` in Sublime Text.
-- Create a new folder named `GeminiAI` inside the `Packages` directory.
-- Save the provided Python code (e.g., `gemini_ai.py`) into this new `GeminiAI` folder.
+Write an incomplete part of text and have Gemini try and complete it. Useful for completing functions or code. Requires some code to be selected.
 
-2. **Create Settings File:**
+#### `instruct_gemini`
 
-- Inside the `GeminiAI` folder, create a new file named `gemini-ai.sublime-settings`.
-- Refer to the [Configuration](#configuration) section below for the content of this file.
+Select some code and then provide an additional prompt for it. Useful for asking questions about code or wanting to ask for a rewrite of the selected code. If no code is selected, the entire file content is sent.
 
-## Configuration
+### Installation
 
-The plugin's settings are managed via `gemini-ai.sublime-settings`. You can access this file by going to `Preferences > Package Settings > Gemini AI > Settings`.
+#### Via Package Control (Recommended)
 
-**Example `gemini-ai.sublime-settings`:**
+1. Open Sublime Text.
+1. Go to Tools > Command Palette... (or press Ctrl+Shift+P / Cmd+Shift+P).
+1. Type Package Control: Install Package and press Enter.
+1. Search for Sublime Gemini and press Enter to install.
+
+#### Manual Installation
+
+1. Navigate to your Sublime Text Packages directory. You can find this by going to Preferences > Browse Packages... in Sublime Text.
+1. Run `git clone https://github.com/james2doyle/sublime-gemini GeminiAI` in that folder
+
+### Configuration
+
+Before using Sublime Gemini, you need to configure your Google Gemini API key.
+Obtain your API key from the Google AI Studio.
+
+In Sublime Text, go to Preferences > Package Settings > Sublime Gemini > Settings.
+
+Add your API key to the `sublime_gemini.sublime-settings` file:
 
 ```json
 {
-    "api_token": "YOUR_GEMINI_API_TOKEN_HERE",
-    "hostname": "generativelanguage.googleapis.com",
-    "max_seconds": 10,
-    "no_empty_selection": true,
-    "completions": {
-        "model": "gemini-2.5-flash",
-        "temperature": 0.0,
-        "top_p": 1,
-        "max_tokens": 100,
-        "keep_prompt_text": true
-    },
-    "edits": {
-        "model": "gemini-2.5-flash",
-        "temperature": 0.4,
-        "top_p": 1
-    }
+    "google_gemini_api_key": "YOUR_API_KEY_HERE"
 }
 ```
 
-**Important:** Replace `"YOUR_GEMINI_API_TOKEN_HERE"` with your actual Gemini API key. You can obtain a key from [Google AI Studio](https://aistudio.google.com/app/apikey) or through Google Cloud.
+Important: Replace `"YOUR_API_KEY_HERE"` with your actual Gemini API key.
 
-## Usage
+### Usage
 
-All commands are accessible via the Sublime Text Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).
+Sublime Gemini provides several commands accessible via the Command Palette or custom key bindings.
 
-### 1. Gemini: Complete Code
+#### Command Palette
 
-This command provides code completions based on your current selection.
+1. Open Tools > Command Palette... (Ctrl+Shift+P / Cmd+Shift+P).
+1. Type Gemini to see available commands:
+  - Gemini: Complete Code: Generates the rest of the code that has been selected.
+  - Gemini: Instruct Code: Add an additional prompt to the selected code.
 
-**How to use:**
+#### Key Bindings
 
-1. Select the code you want Gemini to complete or continue.
-1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-1. Type `Gemini: Complete Code` and press Enter.
+You can set up custom key bindings for frequently used commands. Go to Preferences > Key Bindings and add entries like this:
 
-**Result:** The AI's generated completion will be inserted directly at the location of your selection.
+```json
+[
+    { "keys": ["ctrl+alt+g", "ctrl+alt+c"], "command": "completion_gemini" },
+    { "keys": ["ctrl+alt+g", "ctrl+alt+g"], "command": "instruct_gemini" }
+]
+```
 
-### 2. Gemini: Edit Code
+### Development
 
-This command allows you to provide an instruction to Gemini to modify a section of code or the entire file.
+#### Project Structure
 
-**How to use:**
-
-1. **(Optional) Select code:** Highlight the specific code you want Gemini to edit. If no code is selected, the entire file content will be sent as context.
-1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-1. Type `Gemini: Edit Code` and press Enter.
-1. An input panel will appear at the bottom of the window. Enter your instruction (e.g., "Refactor this function to be more concise", "Add error handling", "Translate this to Python 3").
-1. Press Enter.
-
-**Result:** A new tab named "Gemini Results" will open, containing your original instruction and Gemini's modified code, formatted in Markdown for readability.
-
-## Troubleshooting
-
-- **"Please put an 'api_token' in the GeminiAI package settings"**: Ensure you have configured your `gemini-ai.sublime-settings` file with a valid `api_token`.
-- **"Please highlight a section of code."**: For commands that require a selection (or if `no_empty_selection` is `true`), make sure you have text highlighted.
-- **"Gemini ran out of time!"**: The AI response took longer than the `max_seconds` configured. You can increase `max_seconds` in your settings, or try a simpler prompt.
-- **"Gemini AI Error: [Error Message]"**: An error occurred during the API call. Check the Sublime Text console (`View > Show Console`) for more detailed error messages. Common causes include:
-- Invalid API token.
-- Network issues.
-- API rate limits.
-- Incorrect `hostname` or API endpoint path (though the default should work for standard Gemini API access).
-- **No response / Unexpected output**:
-- Check your `temperature` and `top_p` settings. Higher values can lead to more creative but sometimes less predictable results.
-- Review the Sublime Text console (`View > Show Console`) for `DEBUG` logs from the plugin, which can provide insights into the API request and response.
-- Ensure your prompt is clear and specific.
-
-## Contributing
-
-Feel free to open issues or submit pull requests if you have suggestions, bug fixes, or new features to add.
-
-## License
-
-This project is licensed under the MIT License.
+- `gemini_ai.py`: Main plugin entry point and core logic.
+- `plugin/api_client.py`: Handles communication with the Google Gemini API.
+- `plugin/commands.py`: Defines the Sublime Text commands for AI interactions.
+- `plugin/listeners.py`: Contains event listeners for various Sublime Text events (e.g., selection changes).
+- `plugin/settings.py`: Manages plugin settings and API key storage.
+- `pyproject.toml`: Project configuration for dependency management and build tools.

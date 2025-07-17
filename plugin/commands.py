@@ -318,17 +318,13 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
 
         new_view: sublime.View = window.new_file(sublime.FORCE_GROUP)
 
+        new_view.set_scratch(True)
         new_view.set_name("Gemini Results")
         new_view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
 
-        new_view.run_command("insert", {"characters": "### User:\n\n{}\n\n---\n\n".format(instruction), "point": 0})
-        sublime.set_timeout(
-            lambda: new_view.run_command(
-                "insert", {"characters": "### Results:\n\n{}".format(text), "point": len(instruction) + 4}
-            ),
-            100,
-        )
-        sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 200)
-        sublime.set_timeout(lambda: new_view.run_command("reindent", {"single_line": False}), 300)
+        output = "### User:\n\n{}\n\n---\n\n### Results:\n\n{}".format(instruction, text)
+
+        sublime.set_timeout(lambda: new_view.run_command("append", {"characters": output}), 0)
+        sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 100)
 
         window.focus_view(new_view)

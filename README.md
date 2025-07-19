@@ -54,6 +54,26 @@ Add your API key to the `sublime_gemini.sublime-settings` file:
 
 Important: Replace `"YOUR_API_KEY_HERE"` with your actual Gemini API key.
 
+#### Project Configuration
+
+You can also configure the `api_token` on the project level.
+
+In your `sublime-project` file:
+
+```json
+{
+    // ... folders array with paths, etc.
+    "settings": {
+        "GeminiAI": {
+            "api_token": "YOUR_API_KEY_HERE"
+        }
+        // ... the rest of your settings
+    }
+}
+```
+
+The settings code will check your local `sublime-project` first and then the global User `sublime_gemini.sublime-settings` file.
+
 ### Usage
 
 Sublime Gemini provides several commands accessible via the Command Palette or custom key bindings.

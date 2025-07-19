@@ -1,13 +1,17 @@
-import sublime
-import sublime_plugin
+import logging
 from typing import Any, Callable, Dict, List, Union
 
-# Import necessary functions and classes from their new locations
-from .settings import get_setting, whole_file_as_context
+import sublime
+import sublime_plugin
+
 from .api_client import AsyncGemini
-import logging
+
+# Import necessary functions and classes from their new locations
+from .settings import evaluate_instruction_snippet, get_setting, whole_file_as_context
 
 logger = logging.getLogger("GeminiAIPlugin")
+logging.basicConfig(level=logging.DEBUG)
+
 
 class GeminiCommand(sublime_plugin.TextCommand):
     """
@@ -129,17 +133,15 @@ class GeminiBaseAiCommand(GeminiCommand):
 
         data: Dict[str, Any] = self.get_prompt_data(content, syntax_name, user_input)
 
-        preText: str = ""
-        if command_name == "completions" and command_settings.get("keep_prompt_text", False):
-            preText = content
-        elif command_name == "instruct":
-            preText = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
+        instruction: str = ""
+        if command_name == "instruct":
+            instruction = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
                 syntax_name, syntax_name.lower(), content, user_input
             )
 
         region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
 
-        thread: AsyncGemini = AsyncGemini(self.view, region, data, preText)
+        thread: AsyncGemini = AsyncGemini(self.view, region, data, instruction)
         thread.start()
         self.handle_thread(thread, command_name, self.on_api_success)
 
@@ -182,7 +184,7 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
                 "replace_text",
                 {
                     "region": [thread.region.begin(), thread.region.end()],
-                    "text": "{}{}".format(thread.preText, thread.result),
+                    "results": "{}{}".format(thread.instruction, thread.result),
                 },
             ),
             0,
@@ -217,25 +219,17 @@ class InstructGeminiCommand(GeminiBaseAiCommand):
     def get_command_info(self) -> str:
         return "instruct"
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
+    def get_prompt_data(self, content: str, syntax_name: str, user_input: str) -> Dict[str, Any]:
         settingse: Dict[str, Any] = get_setting(self.view, self.get_command_info())
 
-        preText_for_prompt: str = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
-            syntax_name, syntax_name.lower(), content, user_input
-        )
+        text_for_prompt = evaluate_instruction_snippet(self.view, user_input, content)
 
         return {
             "model": settingse.get("model", "gemini-2.5-flash"),
             "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {
-                            "text": "You are a helpful {} coding assistant. The user is a programmer so you don’t need to over explain. Respond with markdown.\n{}".format(
-                                syntax_name, preText_for_prompt
-                            )
-                        }
-                    ],
+                    "parts": [{"text": text_for_prompt}],
                 }
             ],
             "generationConfig": {
@@ -249,7 +243,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand):
         sublime.set_timeout(
             lambda: self.view.run_command(
                 "open_new_tab_with_content",
-                {"instruction": thread.preText, "text": thread.result},
+                {"instruction": thread.instruction, "results": thread.result},
             ),
             100,
         )
@@ -281,9 +275,7 @@ class InstructGeminiCommand(GeminiBaseAiCommand):
 
         use_whole_file: bool = len(self.view.sel()) == 0 or self.view.sel()[0].empty()
 
-        region: sublime.Region = (
-            self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
-        )
+        region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
         content: str = self.view.substr(region)
         if use_whole_file:
             content = whole_file_as_context(self.view)
@@ -300,9 +292,9 @@ class ReplaceTextCommand(sublime_plugin.TextCommand):
     This command must be run on the main thread.
     """
 
-    def run(self, edit: sublime.Edit, region: List[int], text: str) -> None:
+    def run(self, edit: sublime.Edit, region: List[int], results: str) -> None:
         sublime_region: sublime.Region = sublime.Region(*region)
-        self.view.replace(edit, sublime_region, text)
+        self.view.replace(edit, sublime_region, results)
 
 
 class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
@@ -311,7 +303,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
     and inserts content into it. This command must be run on the main thread.
     """
 
-    def run(self, edit: sublime.Edit, instruction: str, text: str) -> None:
+    def run(self, edit: sublime.Edit, instruction: str, results: str) -> None:
         window: Union[sublime.Window, None] = self.view.window()
         if not window:
             raise ValueError("No window found for creating the new tab.")
@@ -322,7 +314,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
         new_view.set_name("Gemini Results")
         new_view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
 
-        output = "### User:\n\n{}\n\n---\n\n### Results:\n\n{}".format(instruction, text)
+        output = "### User:\n\n{}\n\n---\n\n### Results:\n\n{}".format(instruction, results)
 
         sublime.set_timeout(lambda: new_view.run_command("append", {"characters": output}), 0)
         sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 100)

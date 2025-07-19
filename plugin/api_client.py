@@ -3,19 +3,22 @@ import json
 import logging
 import threading
 from typing import Any, Dict, List, Union
+
 import sublime
 
 # Import get_setting from the new settings module
 from .settings import get_setting
 
 logger = logging.getLogger("GeminiAIPlugin")
+logging.basicConfig(level=logging.DEBUG)
+
 
 class AsyncGemini(threading.Thread):
     """
     A simple async thread class for accessing the Gemini API and waiting for a response.
     """
 
-    def __init__(self, view: sublime.View, region: sublime.Region, data: Dict[str, Any], preText: str):
+    def __init__(self, view: sublime.View, region: sublime.Region, data: Dict[str, Any], instruction: str):
         """
         Initializes the AsyncGemini thread.
 
@@ -23,13 +26,13 @@ class AsyncGemini(threading.Thread):
             view: The Sublime Text view associated with the command.
             region: The sublime.Region object representing the highlighted text.
             data: The payload data for the API request.
-            preText: Text to prepend to the result (e.g., original prompt text).
+            instruction: Original prompt text
         """
         super().__init__()
         self.view: sublime.View = view
         self.region: sublime.Region = region
         self.data: Dict[str, Any] = data
-        self.preText: str = preText
+        self.instruction: str = instruction
         self.running: bool = False
         self.result: Union[str, None] = None
         self.error: Union[str, None] = None

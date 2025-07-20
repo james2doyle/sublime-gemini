@@ -15,10 +15,15 @@ git clone https://github.com/james2doyle/sublime-gemini.git GeminiAI
 ### Features
 
 **Intelligent Code Completion**: Get context-aware suggestions for your code.
+
 **Code Generation**: Generate functions, classes, or entire code blocks based on your natural language prompts.
+
 **Code Refactoring**: Ask Gemini to refactor selected code for improved readability, performance, or adherence to best practices.
+
 **Contextual Q&A**: Ask questions about your code, programming concepts, or general knowledge, and get instant answers within Sublime Text.
+
 **Error Explanation & Debugging Help**: Understand and resolve errors faster with AI-driven explanations and suggestions.
+
 **Custom Prompts**: Provide custom prompts for instruction and completion commands.
 
 ### Commands

@@ -120,7 +120,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         raise NotImplementedError("Subclasses must implement on_api_success()")
 
-    def _prepare_and_run_gemini_thread(self, content: str, user_input: Union[str, None] = None) -> None:
+    def _prepare_and_run_gemini_thread(self, source_code: str, user_input: Union[str, None] = None) -> None:
         """
         Internal method to prepare the data, create the thread, and start monitoring it.
         """
@@ -131,12 +131,12 @@ class GeminiBaseAiCommand(GeminiCommand):
         syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
         logger.debug("Current syntax name: {}".format(syntax_name))
 
-        data: Dict[str, Any] = self.get_prompt_data(content, syntax_name, user_input)
+        data: Dict[str, Any] = self.get_prompt_data(source_code, syntax_name, user_input)
 
-        instruction: str = ""
+        instruction: str = source_code
         if command_name == "instruct":
             instruction = "{} Code:\n\n```{}\n{}\n```\n\nInstruction:\n\n{}".format(
-                syntax_name, syntax_name.lower(), content, user_input
+                syntax_name, syntax_name.lower(), source_code, user_input
             )
 
         region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
@@ -276,11 +276,11 @@ class InstructGeminiCommand(GeminiBaseAiCommand):
         use_whole_file: bool = len(self.view.sel()) == 0 or self.view.sel()[0].empty()
 
         region: sublime.Region = self.view.sel()[0] if self.view.sel() else sublime.Region(0, 0)
-        content: str = self.view.substr(region)
+        source_code: str = self.view.substr(region)
         if use_whole_file:
-            content = whole_file_as_context(self.view)
+            source_code = whole_file_as_context(self.view)
 
-        self._prepare_and_run_gemini_thread(content, user_input)
+        self._prepare_and_run_gemini_thread(source_code, user_input)
 
     def on_input_cancel(self) -> None:
         sublime.status_message("Input canceled.")
@@ -311,12 +311,21 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
         new_view: sublime.View = window.new_file(sublime.FORCE_GROUP)
 
         new_view.set_scratch(True)
+        new_view.set_read_only(False)
+
         new_view.set_name("Gemini Results")
-        new_view.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
+        new_view.assign_syntax("Packages/Markdown/MultiMarkdown.sublime-syntax")
+        new_view.settings().set("scroll_past_end", True)
+        new_view.settings().set("gutter", True)
+        new_view.settings().set("line_numbers", False)
+        new_view.settings().set("fold_buttons", False)
 
         output = "### User:\n\n{}\n\n---\n\n### Results:\n\n{}".format(instruction, results)
 
         sublime.set_timeout(lambda: new_view.run_command("append", {"characters": output}), 0)
         sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 100)
+
+        # turn off editing for this new view
+        new_view.set_read_only(False)
 
         window.focus_view(new_view)

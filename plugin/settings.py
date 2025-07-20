@@ -6,7 +6,6 @@ import sublime
 
 SETTINGS_FILE = "gemini-ai.sublime-settings"
 logger = logging.getLogger("GeminiAIPlugin")
-logging.basicConfig(level=logging.DEBUG)
 
 
 def plugin_settings() -> sublime.Settings:
@@ -49,9 +48,11 @@ def _update_logging_level() -> None:
     debug_logging: bool = settings.get("debug_logging", False)
 
     if debug_logging:
+        logging.basicConfig(level=logging.DEBUG)
         logger.setLevel(logging.DEBUG)
         logger.debug("Gemini AI Plugin logging enabled.")
     else:
+        logging.basicConfig(level=logging.CRITICAL)
         logger.setLevel(logging.CRITICAL)  # Effectively disable logging
 
 
@@ -95,6 +96,7 @@ def evaluate_instruction_snippet(view: sublime.View, user_instruction: str, sele
         "FILE_NAME": variables.get("file", view.file_name()),
         # todo: add in custom variables from the project
         # todo: add in custom rules from the project
+        # todo: add "always include" files
     }
 
     logger.debug("Custom instruct prompt vars: {}".format(custom_variables))

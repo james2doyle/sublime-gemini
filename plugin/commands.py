@@ -10,7 +10,6 @@ from .api_client import AsyncGemini
 from .settings import evaluate_instruction_snippet, get_setting, whole_file_as_context
 
 logger = logging.getLogger("GeminiAIPlugin")
-logging.basicConfig(level=logging.DEBUG)
 
 
 class GeminiCommand(sublime_plugin.TextCommand):

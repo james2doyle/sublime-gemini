@@ -10,7 +10,6 @@ import sublime
 from .settings import get_setting
 
 logger = logging.getLogger("GeminiAIPlugin")
-logging.basicConfig(level=logging.DEBUG)
 
 
 class AsyncGemini(threading.Thread):

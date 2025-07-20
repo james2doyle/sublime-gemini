@@ -8,7 +8,6 @@ import sublime_plugin
 from .settings import _update_logging_level
 
 logger = logging.getLogger("GeminiAIPlugin")
-logging.basicConfig(level=logging.DEBUG)
 
 
 class GeminiAiSettingsListener(sublime_plugin.EventListener):

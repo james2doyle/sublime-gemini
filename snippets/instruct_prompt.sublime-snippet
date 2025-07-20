@@ -12,6 +12,14 @@ $TM_SELECTED_TEXT   An alias for $SELECTION.
 $TM_SCOPE   The scope of the beginning of each selected region. (since 3154)
 $TM_SOFT_TABS   YES if translate_tabs_to_spaces is true, otherwise NO.
 $TM_TAB_SIZE    Spaces per-tab (controlled by the tab_size option).
+# additional vars
+$OS             Platform OS (osx, windows, linux)
+$SHELL          The shell that is currently set in the ENV
+$PROJECT_PATH   The path to the project, if applicable
+$FILE_NAME      The full path to the file being edited
+$SYNTAX         The syntax of the file, extracted from the views syntax
+$INSTRUCTIONS   Instructions added by the user from the console prompt
+$SOURCE_CODE    The code that was selected
  -->
 <snippet>
     <!-- prompt is inspired by Zed: https://github.com/zed-industries/zed/blob/main/assets/prompts/assistant_system_prompt.hbs and https://github.com/zed-industries/zed/blob/main/assets/prompts/content_prompt.hbs -->

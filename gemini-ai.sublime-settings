@@ -8,11 +8,13 @@
 		"model": "gemini-2.5-flash",
 		"temperature": 0.0,
 		"top_p": 1,
-		"max_tokens": 2048
+		"max_tokens": 2048,
+		"prompt_snippet": "Packages/GeminiAI/snippets/completion_prompt.sublime-snippet"
 	},
 	"instruct": {
 		"model": "gemini-2.5-flash",
 		"temperature": 0.4,
-		"top_p": 1
+		"top_p": 1,
+		"prompt_snippet": "Packages/GeminiAI/snippets/instruct_prompt.sublime-snippet"
 	}
 }

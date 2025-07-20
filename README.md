@@ -74,6 +74,41 @@ In your `sublime-project` file:
 
 The settings code will check your local `sublime-project` first and then the global User `sublime_gemini.sublime-settings` file.
 
+#### Custom Prompts
+
+You can also provide custom snippets for editing the prompts that are used during `instruct` and `completion` commands:
+
+```json
+{
+    // ... folders array with paths, etc.
+    "settings": {
+        "GeminiAI": {
+            "api_token": "YOUR_API_KEY_HERE",
+            "completions": {
+                "prompt_snippet": "Packages/GeminiAI/snippets/completion_prompt.sublime-snippet"
+            },
+            "instruct": {
+                "prompt_snippet": "Packages/GeminiAI/snippets/instruct_prompt.sublime-snippet"
+            }
+        }
+        // ... the rest of your settings
+    }
+}
+```
+
+There are some additional vars set for the snippet:
+
+```
+$OS              Platform OS (osx, windows, linux)
+$SHELL           The shell that is currently set in the ENV
+$PROJECT_PATH    The path to the project, if applicable
+$FILE_NAME       The full path to the file being edited
+$SYNTAX          The syntax of the file, extracted from the views syntax
+$SOURCE_CODE     The code that was selected
+```
+
+You can view the current snippets that are using in the snippet directory.
+
 ### Usage
 
 Sublime Gemini provides several commands accessible via the Command Palette or custom key bindings.

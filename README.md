@@ -5,6 +5,13 @@ Sublime Gemini
 
 Sublime Gemini is a powerful Sublime Text plugin that integrates Google's Gemini AI directly into your editor, enhancing your coding workflow with intelligent assistance. From generating code snippets to refactoring and answering programming questions, Sublime Gemini brings the power of AI to your fingertips.
 
+### Install
+
+```sh
+# change to the directory found with "Preference: Browse Packages", then clone
+git clone https://github.com/james2doyle/sublime-gemini.git GeminiAI
+```
+
 ### Features
 
 **Intelligent Code Completion**: Get context-aware suggestions for your code.
@@ -12,6 +19,7 @@ Sublime Gemini is a powerful Sublime Text plugin that integrates Google's Gemini
 **Code Refactoring**: Ask Gemini to refactor selected code for improved readability, performance, or adherence to best practices.
 **Contextual Q&A**: Ask questions about your code, programming concepts, or general knowledge, and get instant answers within Sublime Text.
 **Error Explanation & Debugging Help**: Understand and resolve errors faster with AI-driven explanations and suggestions.
+**Custom Prompts**: Provide custom prompts for instruction and completion commands.
 
 ### Commands
 
@@ -72,11 +80,11 @@ In your `sublime-project` file:
 }
 ```
 
-The settings code will check your local `sublime-project` first and then the global User `sublime_gemini.sublime-settings` file.
+The settings code will check your local `sublime-project` first and then the global User `sublime_gemini.sublime-settings` file. So the project settings take priority.
 
 #### Custom Prompts
 
-You can also provide custom snippets for editing the prompts that are used during `instruct` and `completion` commands:
+You can also provide custom snippets for the prompts that are used during `instruct` and `completion` commands:
 
 ```json
 {
@@ -85,10 +93,10 @@ You can also provide custom snippets for editing the prompts that are used durin
         "GeminiAI": {
             "api_token": "YOUR_API_KEY_HERE",
             "completions": {
-                "prompt_snippet": "Packages/GeminiAI/snippets/completion_prompt.sublime-snippet"
+                "prompt_snippet": "Packages/User/my_completion_prompt.sublime-snippet"
             },
             "instruct": {
-                "prompt_snippet": "Packages/GeminiAI/snippets/instruct_prompt.sublime-snippet"
+                "prompt_snippet": "Packages/User/my_instruct_prompt.sublime-snippet"
             }
         }
         // ... the rest of your settings
@@ -107,7 +115,7 @@ $SYNTAX          The syntax of the file, extracted from the views syntax
 $SOURCE_CODE     The code that was selected
 ```
 
-You can view the current snippets that are using in the snippet directory.
+You can view the current snippets that are using in the `snippets` directory.
 
 ### Usage
 

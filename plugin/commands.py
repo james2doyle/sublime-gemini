@@ -7,7 +7,7 @@ import sublime_plugin
 from .api_client import AsyncGemini
 
 # Import necessary functions and classes from their new locations
-from .settings import evaluate_instruction_snippet, get_setting, whole_file_as_context
+from .settings import evaluate_completion_snippet, evaluate_instruction_snippet, get_setting, whole_file_as_context
 
 logger = logging.getLogger("GeminiAIPlugin")
 
@@ -99,13 +99,13 @@ class GeminiBaseAiCommand(GeminiCommand):
         """
         raise NotImplementedError("Subclasses must implement get_command_info()")
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
+    def get_prompt_data(self, source_code: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
         """
         Constructs the data payload for the Gemini API request.
         Must be implemented by subclasses.
 
         Args:
-            content: The selected text or whole file content.
+            source_code: The selected text or whole file content.
             syntax_name: The name of the current file's syntax.
             user_input: Optional user input for commands like 'instruct'.
         """
@@ -130,7 +130,7 @@ class GeminiBaseAiCommand(GeminiCommand):
         syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
         logger.debug("Current syntax name: {}".format(syntax_name))
 
-        data: Dict[str, Any] = self.get_prompt_data(source_code, syntax_name, user_input)
+        data: Dict[str, Any] = self.get_prompt_data(source_code, user_input)
 
         instruction: str = source_code
         if command_name == "instruct":
@@ -153,20 +153,17 @@ class CompletionGeminiCommand(GeminiBaseAiCommand):
     def get_command_info(self) -> str:
         return "completions"
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
+    def get_prompt_data(self, source_code: str, user_input: Union[str, None] = None) -> Dict[str, Any]:
         settingsc: Dict[str, Any] = get_setting(self.view, self.get_command_info())
+
+        text_for_prompt = evaluate_completion_snippet(self.view, source_code)
+
         return {
             "model": settingsc.get("model", "gemini-2.5-flash"),
             "contents": [
                 {
                     "role": "user",
-                    "parts": [
-                        {
-                            "text": "You are a helpful {} coding assistant. Complete code to the best of your ability when given some. Do not wrap the output with backticks\n{}".format(
-                                syntax_name, content
-                            )
-                        }
-                    ],
+                    "parts": [{"text": text_for_prompt}],
                 }
             ],
             "generationConfig": {
@@ -218,10 +215,10 @@ class InstructGeminiCommand(GeminiBaseAiCommand):
     def get_command_info(self) -> str:
         return "instruct"
 
-    def get_prompt_data(self, content: str, syntax_name: str, user_input: str) -> Dict[str, Any]:
+    def get_prompt_data(self, source_code: str, user_input: str) -> Dict[str, Any]:
         settingse: Dict[str, Any] = get_setting(self.view, self.get_command_info())
 
-        text_for_prompt = evaluate_instruction_snippet(self.view, user_input, content)
+        text_for_prompt = evaluate_instruction_snippet(self.view, user_input, source_code)
 
         return {
             "model": settingse.get("model", "gemini-2.5-flash"),

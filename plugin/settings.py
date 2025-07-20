@@ -73,6 +73,63 @@ $TM_TAB_SIZE    Spaces per-tab (controlled by the tab_size option).
 """
 
 
+def evaluate_completion_snippet(view: sublime.View, selected_code: str) -> str:
+    window: Union[sublime.Window, None] = view.window()
+    if not window:
+        raise ValueError("No window found for evaluating prompt snippet.")
+
+    shell_path = os.environ.get("COMSPEC", os.environ.get("SHELL", "Unknown"))
+
+    variables = window.extract_variables()
+
+    syntax_path: str = view.settings().get("syntax")
+    syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
+
+    custom_variables = {
+        # todo: add in custom completion prompt snippet
+        "name": "Packages/GeminiAI/snippets/completion_prompt.sublime-snippet",
+        "OS": variables.get("platform"),
+        "SHELL": os.path.basename(shell_path),
+        "SYNTAX": syntax_name.lower(),
+        "SOURCE_CODE": selected_code,
+        "PROJECT_PATH": variables.get("project_path", "Not in a project context"),
+        "FILE_NAME": variables.get("file", view.file_name()),
+        # todo: add "always include" files
+    }
+
+    logger.debug("Custom instruct prompt vars: {}".format(custom_variables))
+
+    # Create a new scratch view to insert the snippet into
+    # This view will not be shown to the user.
+    temp_view = window.new_file(flags=sublime.TRANSIENT)
+    temp_view.set_scratch(True)
+
+    # To ensure the snippet evaluates correctly with environment variables like $TM_FILENAME,
+    # we need to set them in the temporary view's settings or pass them to insert_snippet.
+    # For simplicity, we'll just insert it.
+    # Note: Direct evaluation of all snippet features (like $TM_FILENAME) requires
+    # the context of an actual view, so we use a temporary one.
+
+    # The 'insert_snippet' command requires an 'edit' object. Since we are not within
+    # a direct TextCommand's run method for the temp_view, we'll create a dummy edit.
+    # In Sublime Text 3.x and 4.x, edit objects are managed by the API.
+    # The 'insert_snippet' command handles this internally when called via run_command.
+
+    # Insert the snippet into the temporary view
+    temp_view.run_command(
+        "insert_snippet",
+        custom_variables,
+    )
+
+    # Get the content of the temporary view
+    evaluated_content = temp_view.substr(sublime.Region(0, temp_view.size()))
+
+    # Close the temporary view
+    temp_view.close()
+
+    return evaluated_content
+
+
 def evaluate_instruction_snippet(view: sublime.View, user_instruction: str, selected_code: str) -> str:
     window: Union[sublime.Window, None] = view.window()
     if not window:
@@ -86,6 +143,7 @@ def evaluate_instruction_snippet(view: sublime.View, user_instruction: str, sele
     syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
 
     custom_variables = {
+        # todo: add in custom instruct prompt snippet
         "name": "Packages/GeminiAI/snippets/instruct_prompt.sublime-snippet",
         "OS": variables.get("platform"),
         "SHELL": os.path.basename(shell_path),
@@ -94,9 +152,6 @@ def evaluate_instruction_snippet(view: sublime.View, user_instruction: str, sele
         "SOURCE_CODE": selected_code,
         "PROJECT_PATH": variables.get("project_path", "Not in a project context"),
         "FILE_NAME": variables.get("file", view.file_name()),
-        # todo: add in custom variables from the project
-        # todo: add in custom rules from the project
-        # todo: add "always include" files
     }
 
     logger.debug("Custom instruct prompt vars: {}".format(custom_variables))

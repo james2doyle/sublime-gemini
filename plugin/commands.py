@@ -324,8 +324,7 @@ class OpenNewTabWithContentCommand(sublime_plugin.TextCommand):
 
         sublime.set_timeout(lambda: new_view.run_command("append", {"characters": output}), 0)
         sublime.set_timeout(lambda: new_view.run_command("move_to", {"to": "bof"}), 100)
-
         # turn off editing for this new view
-        new_view.set_read_only(False)
+        sublime.set_timeout(lambda: new_view.set_read_only(True), 150)
 
         window.focus_view(new_view)

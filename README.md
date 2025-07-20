@@ -59,7 +59,7 @@ In Sublime Text, go to Preferences > Package Settings > Sublime Gemini > Setting
 
 Add your API key to the `sublime_gemini.sublime-settings` file:
 
-```json
+```jsonc
 {
     "api_token": "YOUR_API_KEY_HERE"
 }
@@ -73,7 +73,7 @@ You can also configure the `api_token` on the project level.
 
 In your `sublime-project` file:
 
-```json
+```jsonc
 {
     // ... folders array with paths, etc.
     "settings": {
@@ -91,7 +91,7 @@ The settings code will check your local `sublime-project` first and then the glo
 
 You can also provide custom snippets for the prompts that are used during `instruct` and `completion` commands:
 
-```json
+```jsonc
 {
     // ... folders array with paths, etc.
     "settings": {
@@ -137,7 +137,7 @@ Sublime Gemini provides several commands accessible via the Command Palette or c
 
 You can set up custom key bindings for frequently used commands. Go to Preferences > Key Bindings and add entries like this:
 
-```json
+```jsonc
 [
     { "keys": ["ctrl+alt+g", "ctrl+alt+c"], "command": "completion_gemini" },
     { "keys": ["ctrl+alt+g", "ctrl+alt+g"], "command": "instruct_gemini" }

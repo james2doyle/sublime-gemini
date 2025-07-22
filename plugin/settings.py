@@ -85,10 +85,9 @@ def evaluate_completion_snippet(view: sublime.View, selected_code: str) -> str:
     syntax_path: str = view.settings().get("syntax")
     syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
 
-    completions_settings = view.settings().get("completions")
+    completions_settings = get_setting(view, "completions")
 
     custom_variables = {
-        # todo: add in custom completion prompt snippet
         "name": completions_settings.get(
             "prompt_snippet", "Packages/GeminiAI/snippets/completion_prompt.sublime-snippet"
         ),
@@ -146,10 +145,9 @@ def evaluate_instruction_snippet(view: sublime.View, user_instruction: str, sele
     syntax_path: str = view.settings().get("syntax")
     syntax_name: str = syntax_path.split("/").pop().split(".")[0] if syntax_path else "plain text"
 
-    instruct_settings = view.settings().get("instruct")
+    instruct_settings = get_setting(view, "instruct")
 
     custom_variables = {
-        # todo: add in custom instruct prompt snippet
         "name": instruct_settings.get("prompt_snippet", "Packages/GeminiAI/snippets/instruct_prompt.sublime-snippet"),
         "OS": variables.get("platform"),
         "SHELL": os.path.basename(shell_path),
